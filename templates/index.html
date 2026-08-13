@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Executive Kiosk Analytics & Management Dashboard | O'zbekiston Temir Yo'llari</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js & Chart.js DataLabels Plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app-container" id="appContainer">
+        <!-- Executive Top Header -->
+        <header class="top-header glass-card">
+            <div class="header-left">
+                <div class="logo-box">
+                    <div class="logo-icon glow-effect">
+                        <i class="fa-solid fa-train-subway"></i>
+                    </div>
+                    <span class="logo-live-pulse" title="Tizim faol va ulangan"></span>
+                </div>
+                <div class="header-titles">
+                    <div class="title-badge-row">
+                        <h1 class="brand-title">Kiosk Analytics <span class="brand-pro">PRO</span></h1>
+                        <div class="badge-group">
+                            <span class="status-badge"><i class="fa-solid fa-circle"></i> Tizim Faol</span>
+                            <span class="role-badge director" id="userRoleBadge"><i class="fa-solid fa-crown"></i> Rahbariyat Paneli</span>
+                        </div>
+                    </div>
+                    <p class="brand-subtitle"><i class="fa-solid fa-building-columns"></i> O'zbekiston Temir Yo'llari – Chiptahona Kiosklari Boshqaruv Paneli</p>
+                </div>
+            </div>
+
+            <div class="header-actions">
+                <!-- Period Selector Dropdown -->
+                <div class="period-select-wrapper" title="Hisobot oyini tanlash">
+                    <i class="fa-solid fa-calendar-days select-icon"></i>
+                    <select id="periodSelect" class="period-select">
+                        <option value="all">Barcha Oylar</option>
+                    </select>
+                    <i class="fa-solid fa-chevron-down select-arrow"></i>
+                </div>
+
+                <!-- Action Buttons Group -->
+                <div class="header-btn-group">
+                    <button class="btn-outline" id="shareUrlBtn" title="Direktorga yuborish uchun havolani olish">
+                        <i class="fa-solid fa-share-nodes"></i> <span>Havola</span>
+                    </button>
+                    <button class="btn-outline" id="tvModeBtn" title="Prezentatsiya (TV) rejimini yoqish">
+                        <i class="fa-solid fa-tv"></i> <span>TV Rejim</span>
+                    </button>
+                    <button class="btn-outline" id="adminAuthBtn" title="Admin rejimiga kirish">
+                        <i class="fa-solid fa-user-shield"></i> <span>Admin</span>
+                    </button>
+                    <button class="btn-outline" id="themeToggleBtn" title="Rejimni o'zgartirish">
+                        <i class="fa-solid fa-moon" id="themeIcon"></i> <span id="themeText">Tungi</span>
+                    </button>
+                    <button class="btn-icon-only" id="refreshBtn" title="Ma'lumotlarni yangilash">
+                        <i class="fa-solid fa-rotate-right"></i>
+                    </button>
+                    <a href="/api/download" class="btn-excel-download" id="downloadBtn">
+                        <i class="fa-solid fa-file-excel"></i> <span>Excel Hisobot</span>
+                    </a>
+                </div>
+            </div>
+        </header>
+
+        <!-- Navigation Tabs Bar -->
+        <nav class="nav-tabs-bar glass-card">
+            <button class="tab-btn active" data-tab="tab-director">
+                <i class="fa-solid fa-crown"></i> Rahbariyat Dashbordi
+            </button>
+            <button class="tab-btn" data-tab="tab-overview">
+                <i class="fa-solid fa-chart-pie"></i> Umumiy Hisobot
+            </button>
+            <button class="tab-btn" data-tab="tab-comparison">
+                <i class="fa-solid fa-code-compare"></i> Oylar Solishtiruvi
+            </button>
+            <button class="tab-btn" data-tab="tab-stations">
+                <i class="fa-solid fa-store"></i> Kassalar Tahlili
+            </button>
+            <button class="tab-btn" data-tab="tab-daily">
+                <i class="fa-solid fa-calendar-days"></i> Kunlik Tahlil
+            </button>
+            <button class="tab-btn" data-tab="tab-admin" style="display: none;">
+                <i class="fa-solid fa-sliders"></i> Admin Markazi
+            </button>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            
+            <!-- TAB 0: RAHBARIYAT DASHBORDI (EXECUTIVE VIEW) -->
+            <div class="tab-content active" id="tab-director">
+                <!-- Executive Summary Real KPI Cards -->
+                <section class="kpi-grid director-kpi-grid">
+                    <div class="kpi-card glass-card card-emerald glow-card">
+                        <div class="kpi-header">
+                            <span class="kpi-title">Jami Tushgan Summa</span>
+                            <div class="kpi-icon"><i class="fa-solid fa-wallet"></i></div>
+                        </div>
+                        <div class="kpi-value" id="dirKpiNetRevenue">0 so'm</div>
+                        <div class="kpi-footer">
+                            <span class="kpi-badge positive"><i class="fa-solid fa-circle-check"></i> Sof Tushum</span>
+                            <span class="kpi-subtext">Barcha 15 kassa bo'yicha</span>
+                        </div>
+                    </div>
+
+                    <div class="kpi-card glass-card card-cyan">
+                        <div class="kpi-header">
+                            <span class="kpi-title">Jami Sotilgan Chiptalar</span>
+                            <div class="kpi-icon"><i class="fa-solid fa-ticket"></i></div>
+                        </div>
+                        <div class="kpi-value" id="dirKpiTotalTickets">0 ta</div>
+                        <div class="kpi-footer">
+                            <span class="kpi-badge positive"><i class="fa-solid fa-arrow-trend-up"></i> Hujjatlashtirilgan</span>
+                            <span class="kpi-subtext">Kiosklar umumiy sotuvi</span>
+                        </div>
+                    </div>
+
+                    <div class="kpi-card glass-card card-violet glow-card">
+                        <div class="kpi-header">
+                            <span class="kpi-title">Eng Yuqori Savdoli Kassa</span>
+                            <div class="kpi-icon"><i class="fa-solid fa-trophy"></i></div>
+                        </div>
+                        <div class="kpi-value" id="dirKpiTopStationName" style="font-size: 24px; color: var(--accent-violet);">-</div>
+                        <div class="kpi-footer">
+                            <span class="kpi-badge positive" id="dirKpiTopStationShare"><i class="fa-solid fa-crown"></i> 0% ulush</span>
+                            <span class="kpi-subtext" id="dirKpiTopStationSum">0 so'm</span>
+                        </div>
+                    </div>
+
+                    <div class="kpi-card glass-card card-amber">
+                        <div class="kpi-header">
+                            <span class="kpi-title">To'lov Nisbati (Online / Terminal)</span>
+                            <div class="kpi-icon"><i class="fa-solid fa-credit-card"></i></div>
+                        </div>
+                        <div class="kpi-value" id="dirKpiPaymentRatio" style="font-size: 24px;">0% / 0%</div>
+                        <div class="kpi-footer">
+                            <span class="kpi-badge positive" id="dirKpiPaymentOnline"><i class="fa-solid fa-globe"></i> Online: 0 ta</span>
+                            <span class="kpi-subtext" id="dirKpiPaymentTerminal">Terminal: 0 ta</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- AI Executive Briefing Banner -->
+                <section class="glass-card section-padding glow-border" style="position: relative; overflow: hidden;">
+                    <div style="display: flex; align-items: flex-start; gap: 20px; flex-wrap: wrap;">
+                        <div class="director-ai-avatar">
+                            <i class="fa-solid fa-brain"></i>
+                        </div>
+                        <div style="flex: 1;">
+                            <div class="flex-between" style="margin-bottom: 8px;">
+                                <h3 style="font-size: 18px; font-weight: 700; color: var(--text-primary);">
+                                    <i class="fa-solid fa-lightbulb" style="color: var(--accent-amber);"></i> Rahbariyat uchun Tahliliy Xulosa va Operatsion Ko'rsatkichlar
+                                </h3>
+                                <span class="card-badge green"><i class="fa-solid fa-shield-check"></i> Real-Vaqt Tahlili</span>
+                            </div>
+                            <p id="directorAiText" style="font-size: 15px; color: var(--text-secondary); line-height: 1.6;">
+                                Tizim ma'lumotlari tahlil qilinmoqda...
+                            </p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Horizontal Revenue Chart Section -->
+                <section class="charts-grid" style="grid-template-columns: 1.6fr 1fr;">
+                    <div class="chart-card glass-card" style="padding: 24px;">
+                        <div class="card-header flex-between" style="margin-bottom: 16px;">
+                            <div>
+                                <h3 style="font-size: 18px; font-weight: 700;"><i class="fa-solid fa-chart-bar" style="color: var(--accent-cyan);"></i> Kassalar Bo'yicha Tushum va Ulushlar (Gorizontal Grafik)</h3>
+                                <p class="section-desc">Har bir kassaning aniq tushum summasi va ravon o'qiladigan reytingi</p>
+                            </div>
+                            <span class="card-badge">Tushum Reytingi</span>
+                        </div>
+                        <!-- Horizontal Bar Chart Container -->
+                        <div class="chart-wrapper" style="height: 480px; position: relative;">
+                            <canvas id="directorHorizontalChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="chart-card glass-card" style="padding: 24px;">
+                        <div class="card-header flex-between" style="margin-bottom: 16px;">
+                            <div>
+                                <h3 style="font-size: 18px; font-weight: 700;"><i class="fa-solid fa-chart-pie" style="color: var(--accent-violet);"></i> Kassalar Tushum Ulushi (%)</h3>
+                                <p class="section-desc">Kassalarning umumiy tushumdagi ulushi</p>
+                            </div>
+                            <span class="card-badge green">Ulush</span>
+                        </div>
+                        <div class="chart-wrapper" style="height: 480px;">
+                            <canvas id="directorShareChart"></canvas>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Executive Matrix Table -->
+                <section class="table-section glass-card">
+                    <div class="card-header flex-between">
+                        <div>
+                            <h3><i class="fa-solid fa-trophy"></i> Kassalar bo'yicha Aniq Moliyaviy Matritsa</h3>
+                            <p class="section-desc">15 ta chiptahona kioski bo'yicha tushgan summa, chiptalar soni va ulushlar jadvali</p>
+                        </div>
+                        <button class="btn btn-secondary" onclick="window.print()" title="Hisobotni chop etish">
+                            <i class="fa-solid fa-print"></i> Chop Etish / PDF
+                        </button>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="data-table director-matrix-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 70px; text-align: center;">№</th>
+                                    <th>Kassa / Stansiya</th>
+                                    <th style="text-align: right;">Chiptalar Soni</th>
+                                    <th style="text-align: right;">Jami Summa (so'm)</th>
+                                    <th style="text-align: right;">O'rtacha Chek</th>
+                                    <th style="width: 220px;">Ulushi (%)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="directorMatrixTableBody">
+                                <tr>
+                                    <td colspan="6" class="empty-row">Ma'lumotlar yuklanmoqda...</td>
+                                </tr>
+                            </tbody>
+                            <tfoot id="directorMatrixTableFoot"></tfoot>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- TAB 1: OVERVIEW DASHBOARD -->
+            <div class="tab-content" id="tab-overview">
+                
+                <!-- Upload & File Drag-Drop Area -->
+                <section class="upload-section" style="display: none;">
+                    <div class="dropzone glow-border" id="dropzone">
+                        <input type="file" id="fileInput" accept=".xlsx, .xls" hidden>
+                        <div class="dropzone-content">
+                            <div class="upload-icon-pulse">
+                                <i class="fa-solid fa-cloud-arrow-up"></i>
+                            </div>
+                            <h3>Adminka Excel Faylini Shu Yerga Tashlang</h3>
+                            <p>Yangi yuklangan <code>data.xlsx</code> faylini kiritsangiz, barcha 15 ta kassa bo'yicha hisobot darhol qayta ishlanadi</p>
+                            <button class="btn btn-accent" onclick="document.getElementById('fileInput').click()">
+                                <i class="fa-solid fa-folder-open"></i> Faylni Tanlash
+                            </button>
+                        </div>
+                        <div class="upload-spinner" id="uploadSpinner" style="display: none;">
+                            <div class="spinner-ring"></div>
+                            <p id="spinnerText">Fayl o'qilmoqda va Excel hisobot shakllantirilmoqda...</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- KPI Metric Cards -->
+                <section class="kpi-grid">
+                    <div class="kpi-card glass-card card-cyan">
+                        <div class="kpi-header">
+                            <span class="kpi-title">Jami Sotilgan Chiptalar</span>
+                            <div class="kpi-icon"><i class="fa-solid fa-ticket"></i></div>
+                        </div>
+                        <div class="kpi-value" id="kpiTickets">0</div>
+                        <div class="kpi-footer">
+                            <span class="kpi-badge positive"><i class="fa-solid fa-arrow-trend-up"></i> 100% Aniq</span>
+                            <span class="kpi-subtext">Barcha 15 kassa bo'yicha</span>
+                        </div>
+                    </div>
+
+                    <div class="kpi-card glass-card card-emerald">
+                        <div class="kpi-header">
+                            <span class="kpi-title">Jami Tushgan Summa</span>
+                            <div class="kpi-icon"><i class="fa-solid fa-wallet"></i></div>
+                        </div>
+                        <div class="kpi-value" id="kpiSumma">0 so'm</div>
+                        <div class="kpi-footer">
+                            <span class="kpi-badge positive"><i class="fa-solid fa-check"></i> Balanslandi</span>
+                            <span class="kpi-subtext">Summa to'g'ri bog'langan</span>
+                        </div>
+                    </div>
+
+                    <div class="kpi-card glass-card card-violet">
+                        <div class="kpi-header">
+                            <span class="kpi-title">Eng Yuqori Kassa</span>
+                            <div class="kpi-icon"><i class="fa-solid fa-trophy"></i></div>
+                        </div>
+                        <div class="kpi-value" id="kpiTopStation">Самарқанд</div>
+                        <div class="kpi-footer">
+                            <span class="kpi-subtext" id="kpiTopStationVal">658 chipta (184.1 mln so'm)</span>
+                        </div>
+                    </div>
+
+                    <div class="kpi-card glass-card card-amber">
+                        <div class="kpi-header">
+                            <span class="kpi-title">To'lov Turlari Nisbati</span>
+                            <div class="kpi-icon"><i class="fa-solid fa-credit-card"></i></div>
+                        </div>
+                        <div class="kpi-value" id="kpiRatio">0% / 0%</div>
+                        <div class="kpi-footer">
+                            <span class="kpi-subtext" id="kpiRatioSub">Online vs Terminal</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Analytics Charts -->
+                <section class="charts-grid">
+                    <div class="chart-card glass-card" style="padding: 24px;">
+                        <div class="card-header flex-between" style="margin-bottom: 12px;">
+                            <h3><i class="fa-solid fa-chart-bar" style="color: var(--accent-cyan)"></i> Kassalar Bo'yicha Savdo (Gorizontal Grafik)</h3>
+                            <span class="card-badge">Tushum va Chiptalar</span>
+                        </div>
+                        <div class="chart-wrapper" style="height: 440px;">
+                            <canvas id="revenueChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="chart-card glass-card" style="padding: 24px;">
+                        <div class="card-header flex-between" style="margin-bottom: 12px;">
+                            <h3><i class="fa-solid fa-chart-line" style="color: var(--accent-emerald)"></i> Kunlik Savdo Dinamikasi</h3>
+                            <span class="card-badge green" id="trendChartBadge">Dinamika</span>
+                        </div>
+                        <div class="chart-wrapper" style="height: 440px;">
+                            <canvas id="trendChart"></canvas>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Overview Data Table with Business Sorting -->
+                <section class="table-section glass-card">
+                    <div class="card-header flex-between flex-wrap gap-12">
+                        <div>
+                            <h3><i class="fa-solid fa-ranking-star"></i> Kiosk Kassalari Reytingi va Saralash</h3>
+                            <p class="section-desc">Kassalarni tushum summasi yoki sotilgan chiptalar soni bo'yicha ketma-ket saralang</p>
+                        </div>
+
+                        <div class="header-controls">
+                            <!-- Business Sort Segment Control -->
+                            <div class="sort-segment-control" id="sortSegmentControl">
+                                <button class="sort-btn active" data-sort="summa">
+                                    <i class="fa-solid fa-coins"></i> Summasi Bo'yicha
+                                </button>
+                                <button class="sort-btn" data-sort="soni">
+                                    <i class="fa-solid fa-ticket"></i> Soni Bo'yicha
+                                </button>
+                                <button class="sort-btn" data-sort="name">
+                                    <i class="fa-solid fa-arrow-down-a-z"></i> Stansiya Nomi
+                                </button>
+                            </div>
+
+                            <div class="table-search-box">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="text" id="tableSearch" placeholder="Kassa nomini qidiring...">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="data-table" id="kioskTable">
+                            <thead>
+                                <tr>
+                                    <th>№</th>
+                                    <th class="sortable-th" data-sort-key="name">Kassa / Stansiya <i class="fa-solid fa-sort"></i></th>
+                                    <th class="sortable-th" data-sort-key="soni">Sotilgan Chiptalar <i class="fa-solid fa-sort"></i></th>
+                                    <th class="sortable-th active" data-sort-key="summa">Jami Summa (so'm) <i class="fa-solid fa-sort-down"></i></th>
+                                    <th>Ulushi (%)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tableBody">
+                                <tr>
+                                    <td colspan="5" class="empty-row">Ma'lumotlar yuklanmoqda...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+            </div>
+
+            <!-- TAB: MONTH-OVER-MONTH COMPARISON -->
+            <div class="tab-content" id="tab-comparison">
+                <section class="glass-card section-padding">
+                    <div class="card-header flex-between flex-wrap gap-12">
+                        <div>
+                            <h2><i class="fa-solid fa-code-compare"></i> Oylar Kesimida Solishtirish va Savdo O'sishi Tahlili</h2>
+                            <p class="section-desc">Raxbariyat uchun oylar kesimida savdo dinamikasini, o'sish va pasayish ko'rsatkichlarini solishtirish paneli</p>
+                        </div>
+                        <div class="comp-selectors-group">
+                            <div class="comp-select-item">
+                                <label for="compBaseMonth"><i class="fa-solid fa-calendar-minus"></i> Asosiy Oy:</label>
+                                <select id="compBaseMonth" class="period-select">
+                                    <option value="">Tanlang...</option>
+                                </select>
+                            </div>
+                            <div class="comp-select-item">
+                                <label for="compTargetMonth"><i class="fa-solid fa-calendar-plus"></i> Solishtirilayotgan Oy:</label>
+                                <select id="compTargetMonth" class="period-select">
+                                    <option value="">Tanlang...</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Executive MoM Growth Cards -->
+                    <div class="kpi-grid comp-kpi-grid" style="margin-top: 20px;">
+                        <div class="kpi-card glass-card card-emerald">
+                            <div class="kpi-header">
+                                <span class="kpi-title">Tushum O'sishi (Summa)</span>
+                                <div class="kpi-icon"><i class="fa-solid fa-chart-line"></i></div>
+                            </div>
+                            <div class="kpi-value" id="momRevGrowth">0 so'm</div>
+                            <div class="kpi-footer">
+                                <span class="kpi-badge positive" id="momRevBadge"><i class="fa-solid fa-arrow-trend-up"></i> 0%</span>
+                                <span class="kpi-subtext" id="momRevSub">Oylar o'rtasidagi farq</span>
+                            </div>
+                        </div>
+
+                        <div class="kpi-card glass-card card-cyan">
+                            <div class="kpi-header">
+                                <span class="kpi-title">Chiptalar Soni O'sishi (Soni)</span>
+                                <div class="kpi-icon"><i class="fa-solid fa-ticket"></i></div>
+                            </div>
+                            <div class="kpi-value" id="momTicketGrowth">0 ta</div>
+                            <div class="kpi-footer">
+                                <span class="kpi-badge positive" id="momTicketBadge"><i class="fa-solid fa-arrow-trend-up"></i> 0%</span>
+                                <span class="kpi-subtext" id="momTicketSub">Chipta hajmi o'zgarishi</span>
+                            </div>
+                        </div>
+
+                        <div class="kpi-card glass-card card-violet">
+                            <div class="kpi-header">
+                                <span class="kpi-title">Eng Yuqori O'sgan Kiosk</span>
+                                <div class="kpi-icon"><i class="fa-solid fa-arrow-up-right-dots"></i></div>
+                            </div>
+                            <div class="kpi-value" id="momTopStation">-</div>
+                            <div class="kpi-footer">
+                                <span class="kpi-subtext" id="momTopStationSub">Eng yuqori o'sish ko'rsatkichi</span>
+                            </div>
+                        </div>
+
+                        <div class="kpi-card glass-card card-amber">
+                            <div class="kpi-header">
+                                <span class="kpi-title">O'rtacha Chek O'sishi</span>
+                                <div class="kpi-icon"><i class="fa-solid fa-receipt"></i></div>
+                            </div>
+                            <div class="kpi-value" id="momAvgPriceGrowth">0 so'm</div>
+                            <div class="kpi-footer">
+                                <span class="kpi-subtext" id="momAvgPriceSub">Bitta chiptaning o'rtacha narxi</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Executive Summary Banner -->
+                    <div class="executive-summary-box glass-card glow-border" id="executiveSummaryBox" style="margin-top: 24px; padding: 18px 24px; display: flex; align-items: center; gap: 16px;">
+                        <div style="font-size: 28px; color: var(--accent-cyan);">
+                            <i class="fa-solid fa-lightbulb"></i>
+                        </div>
+                        <div>
+                            <h4 style="margin: 0 0 4px 0; font-size: 16px; color: var(--text-primary);">Raxbariyat uchun Xulosa</h4>
+                            <p id="executiveSummaryText" style="margin: 0; font-size: 14px; color: var(--text-secondary);">
+                                Oylar bo'yicha ma'lumotlar solishtirilmoqda...
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- MoM Comparison Charts -->
+                    <div class="charts-grid" style="margin-top: 24px;">
+                        <div class="chart-card glass-card" style="grid-column: 1 / -1;">
+                            <div class="card-header flex-between">
+                                <h3><i class="fa-solid fa-chart-column"></i> Kassalar Bo'yicha Oyma-Oy Tushum Solishtiruvi (So'm)</h3>
+                                <span class="card-badge">Solishtirma Grafik</span>
+                            </div>
+                            <div class="chart-wrapper" style="height: 340px;">
+                                <canvas id="comparisonChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- MoM Detailed Station Comparison Table -->
+                    <div class="table-section glass-card" style="margin-top: 24px;">
+                        <div class="card-header flex-between">
+                            <h3><i class="fa-solid fa-list-check"></i> Kassalar Bo'yicha Oyma-Oy O'sish Ko'rsatkichlari Jadvallari</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>№</th>
+                                        <th>Kassa / Stansiya</th>
+                                        <th>O'tgan Oy Tushumi</th>
+                                        <th>Hozirgi Oy Tushumi</th>
+                                        <th>Farq Summasi (so'm)</th>
+                                        <th>O'sish Dinamikasi (%)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="comparisonTableBody">
+                                    <tr>
+                                        <td colspan="6" class="empty-row">Solishtirish uchun oylarni tanlang...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- TAB 2: STATIONS BREAKDOWN -->
+            <div class="tab-content" id="tab-stations">
+                <section class="glass-card section-padding">
+                    <div class="card-header flex-between">
+                        <div>
+                            <h2><i class="fa-solid fa-store"></i> Kassalar Tahlili va Ko'rsatkichlari</h2>
+                            <p class="section-desc">Har bir chiptahona kioski bo'yicha batafsil ulush va bajarilgan ish hajmi</p>
+                        </div>
+                        <div class="sort-segment-control" id="stationsTabSortControl">
+                            <button class="sort-btn active" data-sort="summa">Summa Bo'yicha</button>
+                            <button class="sort-btn" data-sort="soni">Soni Bo'yicha</button>
+                        </div>
+                    </div>
+                    <div class="station-cards-grid" id="stationCardsGrid">
+                        <!-- Dynamic station cards -->
+                    </div>
+                </section>
+            </div>
+
+            <!-- TAB 3: DAILY BREAKDOWN -->
+            <div class="tab-content" id="tab-daily">
+                <section class="glass-card section-padding">
+                    <div class="card-header flex-between">
+                        <div>
+                            <h2><i class="fa-solid fa-calendar-days"></i> Kunlik Savdo Matritsasi</h2>
+                            <p class="section-desc">Oy bo'yicha har bir kunga tegishli chiptalar va to'lov turlari bo'yicha savdolar jadvali</p>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="data-table daily-table">
+                            <thead>
+                                <tr>
+                                    <th>Sana</th>
+                                    <th>Jami Chiptalar</th>
+                                    <th>Jami Summa</th>
+                                    <th>Online To'lov</th>
+                                    <th>Terminal To'lov</th>
+                                    <th>Holat</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dailyTableBody">
+                                <!-- Dynamic daily rows -->
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- TAB 4: ADMIN CENTER -->
+            <div class="tab-content" id="tab-admin">
+                <!-- Admin Email Mappings Editor -->
+                <section class="glass-card section-padding" style="margin-bottom: 24px;">
+                    <div class="card-header flex-between">
+                        <div>
+                            <h2><i class="fa-solid fa-at" style="color: var(--accent-violet);"></i> Pochta va Kassa Biriktirmalari Sozlamasi</h2>
+                            <p class="section-desc">Adminkadagi pochtalarni Excel hisobotdagi mos kassa nomlariga va ustun indekslariga bog'lash</p>
+                        </div>
+                        <button class="btn btn-primary" id="saveMappingsTabBtn">
+                            <i class="fa-solid fa-floppy-disk"></i> Pochtalar Saqlash
+                        </button>
+                    </div>
+                    <div class="mapping-editor-grid" id="mappingEditorGrid">
+                        <!-- Dynamic mapping editor -->
+                    </div>
+                </section>
+
+                <!-- Excel Upload Audit Logs -->
+                <section class="table-section glass-card">
+                    <div class="card-header flex-between">
+                        <div>
+                            <h2><i class="fa-solid fa-clock-rotate-left" style="color: var(--accent-amber);"></i> Excel Fayllar Yuklash Audit Tarixi</h2>
+                            <p class="section-desc">Tizimga kiritilgan oxirgi fayllar va yangilanish jurnali</p>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>№</th>
+                                    <th>Fayl Nomi</th>
+                                    <th>Qatorlar Soni</th>
+                                    <th>Sana va Vaqt</th>
+                                    <th>Holat</th>
+                                </tr>
+                            </thead>
+                            <tbody id="uploadLogsTableBody">
+                                <tr>
+                                    <td colspan="5" class="empty-row">Audit tarixi yuklanmoqda...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>&copy; 2026 O'zbekiston Temir Yo'llari – Kiosk Analytics Executive Dashboard</p>
+        </footer>
+    </div>
+
+    <!-- Admin Login Modal -->
+    <div class="modal-backdrop" id="adminLoginModal" style="display: none;">
+        <div class="modal-card glass-card glow-border">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-lock" style="color: var(--accent-cyan);"></i> Admin Rejimiga Kirish</h3>
+                <button class="modal-close-btn" id="closeAdminModalBtn">&times;</button>
+            </div>
+            <div class="modal-body" style="margin-top: 14px;">
+                <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 16px;">
+                    Sozlamalar va pochta biriktirmalarini tahrirlash uchun Admin parolini kiriting.
+                </p>
+                <div class="input-group">
+                    <label for="adminPasswordInput">Admin Paroli:</label>
+                    <input type="password" id="adminPasswordInput" class="input-control" placeholder="Parolni kiriting (Standart: admin)..." autocomplete="off">
+                    <div id="adminLoginError" style="color: var(--accent-rose); font-size: 13px; margin-top: 6px; display: none;"></div>
+                </div>
+            </div>
+            <div class="modal-footer" style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px;">
+                <button class="btn btn-secondary" id="cancelAdminModalBtn">Bekor qilish</button>
+                <button class="btn btn-primary" id="submitAdminLoginBtn">
+                    <i class="fa-solid fa-right-to-bracket"></i> Kirish
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Share URL Public Link Modal -->
+    <div class="modal-backdrop" id="shareModal" style="display: none;">
+        <div class="modal-card glass-card glow-border" style="max-width: 520px;">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-share-nodes" style="color: var(--accent-cyan);"></i> Direktorga Havola Yuborish</h3>
+                <button class="modal-close-btn" id="closeShareModalBtn">&times;</button>
+            </div>
+            <div class="modal-body" style="margin-top: 14px;">
+                <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 16px;">
+                    Ushbu dashboardni Direktor har qanday kompyuter yoki telefondan onlayn ko'rishi uchun <strong>Public Havola (URL)</strong> hosil qilish bo'yicha yo'riqnoma:
+                </p>
+
+                <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 14px; margin-bottom: 14px;">
+                    <h4 style="font-size: 14px; font-weight: 700; color: var(--accent-emerald); margin-bottom: 6px;">
+                        <i class="fa-solid fa-terminal"></i> Bir Bosishda Public Link Yaratish
+                    </h4>
+                    <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;">
+                        Loyiha papkasidagi <code>Ulashish_Havola_Mac.command</code> faylini ikki marta bosing. Terminalda hosil bo'lgan <code>https://...loca.lt</code> havolani oling.
+                    </p>
+                </div>
+
+                <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 14px;">
+                    <h4 style="font-size: 14px; font-weight: 700; color: var(--accent-cyan); margin-bottom: 6px;">
+                        <i class="fa-solid fa-wifi"></i> Mahalliy Tarmoq (Wi-Fi) Orqali
+                    </h4>
+                    <p style="font-size: 13px; color: var(--text-secondary); margin: 0;">
+                        Bir xil Wi-Fi tarmog'ida bo'lsangiz, Direktor brauzeriga quyidagi IP manzilni kiriting: <br>
+                        <code style="font-size: 14px; font-weight: 700; color: var(--accent-amber);">http://192.168.0.97:5050</code>
+                    </p>
+                </div>
+            </div>
+            <div class="modal-footer" style="margin-top: 20px; display: flex; justify-content: flex-end;">
+                <button class="btn btn-primary" id="okShareModalBtn">Tushundim</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Station Details Modal -->
+    <div id="stationDetailModal" class="modal-backdrop" style="display: none;">
+        <div class="modal-card glass-card glow-border" style="max-width: 1350px; width: 97%; max-height: 95vh; display: flex; flex-direction: column; padding: 0; overflow: hidden;">
+            <div class="modal-header" style="padding: 22px 28px; border-bottom: 1px solid var(--border-glass); background: rgba(255, 255, 255, 0.02); display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 20px; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: 14px;">
+                        <div class="st-icon" style="width: 44px; height: 44px; font-size: 20px; background: rgba(56, 189, 248, 0.15); color: var(--accent-cyan); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+                            <i class="fa-solid fa-train-subway"></i>
+                        </div>
+                        <div>
+                            <h3 style="font-size: 20px; font-weight: 800; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 10px;">
+                                <span id="modalStationTitle">-</span>
+                                <span id="modalStationRankBadge" class="rank-badge rank-1" style="font-size: 12px; height: 26px; padding: 0 10px; width: auto;">1-O'rin</span>
+                            </h3>
+                            <p id="modalStationSubtitle" style="font-size: 13px; color: var(--text-secondary); margin: 4px 0 0 0;">Kiosk bo'yicha batafsil moliyaviy va operatsion ko'rsatkichlar</p>
+                        </div>
+                    </div>
+
+                    <!-- Station Modal Month Capsule Selector -->
+                    <div class="period-select-wrapper">
+                        <i class="fa-solid fa-calendar-days period-icon"></i>
+                        <select id="modalStationMonthSelect" class="period-select" style="padding-left: 36px; padding-right: 32px; font-weight: 700; height: 38px;">
+                            <!-- Populated dynamically by JS -->
+                        </select>
+                    </div>
+                </div>
+                <button class="modal-close-btn" id="closeStationModalBtn">&times;</button>
+            </div>
+
+            <div class="modal-body" style="padding: 24px 28px; overflow-y: auto; flex: 1;">
+                <!-- Top 4 Mini KPIs -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px;">
+                    <div class="kpi-card glass-card card-emerald" style="padding: 16px;">
+                        <span class="kpi-title" style="font-size: 12px;">Jami Tushum</span>
+                        <div class="kpi-value" id="modalStSumma" style="font-size: 20px; margin: 6px 0;">0 so'm</div>
+                        <span class="kpi-subtext" id="modalStShare">0% ulush</span>
+                    </div>
+                    <div class="kpi-card glass-card card-cyan" style="padding: 16px;">
+                        <span class="kpi-title" style="font-size: 12px;">Chiptalar Soni</span>
+                        <div class="kpi-value" id="modalStTickets" style="font-size: 20px; margin: 6px 0;">0 ta</div>
+                        <span class="kpi-subtext">Hujjatlashtirilgan sotuv</span>
+                    </div>
+                    <div class="kpi-card glass-card card-violet" style="padding: 16px;">
+                        <span class="kpi-title" style="font-size: 12px;">To'lov Nisbati (Online / Terminal)</span>
+                        <div class="kpi-value" id="modalStPaymentRatio" style="font-size: 20px; margin: 6px 0;">33.9% / 66.1%</div>
+                        <span class="kpi-subtext" id="modalStPaymentSub">Online vs Terminal</span>
+                    </div>
+                    <div class="kpi-card glass-card card-amber" style="padding: 16px;">
+                        <span class="kpi-title" style="font-size: 12px;">Eng Savdoli Kuni</span>
+                        <div class="kpi-value" id="modalStPeakDate" style="font-size: 18px; margin: 6px 0;">-</div>
+                        <span class="kpi-subtext" id="modalStPeakSum">0 so'm</span>
+                    </div>
+                </div>
+
+                <!-- Daily Sales Breakdown Table -->
+                <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-glass); border-radius: 16px; padding: 20px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+                        <h4 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin: 0;">
+                            <i class="fa-solid fa-calendar-days" style="color: var(--accent-cyan); margin-right: 8px;"></i> Kunlik Savdo Matritsasi (Kiosk Kesimida)
+                        </h4>
+                        <span class="kpi-subtext" id="modalStTotalDaysCount">31 kunlik tahlil</span>
+                    </div>
+
+                    <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                        <table class="data-table director-matrix-table" style="margin: 0;">
+                            <thead>
+                                <tr>
+                                    <th style="width: 110px;">Sana</th>
+                                    <th style="text-align: right;">Sotilgan Chiptalar</th>
+                                    <th style="text-align: right;">Kunlik Tushum</th>
+                                    <th style="text-align: right;">O'rtacha Chek</th>
+                                    <th style="text-align: center; width: 110px;">Holat</th>
+                                </tr>
+                            </thead>
+                            <tbody id="modalStationDailyBody">
+                                <!-- Populated dynamically by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer" style="padding: 16px 28px; border-top: 1px solid var(--border-glass); background: rgba(0, 0, 0, 0.2); display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+                <span style="font-size: 12.5px; color: var(--text-secondary);">
+                    <i class="fa-solid fa-circle-info" style="color: var(--accent-cyan); margin-right: 4px;"></i>
+                    Ma'lumotlar avtomatik Excel hisoboti asosida tayyorlangan
+                </span>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <button class="btn btn-excel-download" id="exportStationExcelBtn" style="height: 38px; padding: 0 16px; font-size: 13px;">
+                        <i class="fa-solid fa-file-excel"></i> Excel Yuklash (.xlsx)
+                    </button>
+                    <button class="btn btn-secondary" id="closeStationModalFooterBtn">Yopish</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications Container -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <!-- Custom JS -->
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

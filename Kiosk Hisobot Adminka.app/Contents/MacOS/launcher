@@ -1,0 +1,3 @@
+#!/bin/bash
+cd "/Users/javohir/Desktop/need/Javohir/loyha/kiosk xisobot adminka"
+python3 app.py

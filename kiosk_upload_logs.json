@@ -1,0 +1,30 @@
+[
+  {
+    "id": 4,
+    "filename": "data.xlsx",
+    "rows": 1,
+    "timestamp": "13.08.2026 22:18:13",
+    "status": "Muvaffaqiyatli"
+  },
+  {
+    "id": 3,
+    "filename": "data (1).xlsx",
+    "rows": 1,
+    "timestamp": "13.08.2026 09:32:12",
+    "status": "Muvaffaqiyatli"
+  },
+  {
+    "id": 2,
+    "filename": "data (1).xlsx",
+    "rows": 1,
+    "timestamp": "13.08.2026 08:49:06",
+    "status": "Muvaffaqiyatli"
+  },
+  {
+    "id": 1,
+    "filename": "data (1).xlsx",
+    "rows": 20364,
+    "timestamp": "12.08.2026 12:20:38",
+    "status": "Muvaffaqiyatli"
+  }
+]
