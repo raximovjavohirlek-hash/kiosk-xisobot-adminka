@@ -1,0 +1,51 @@
+[
+  {
+    "id": 7,
+    "filename": "data (2).xlsx",
+    "rows": 65820,
+    "timestamp": "19.08.2026 09:27:21",
+    "status": "Muvaffaqiyatli"
+  },
+  {
+    "id": 6,
+    "filename": "data (2).xlsx",
+    "rows": 1,
+    "timestamp": "19.08.2026 09:21:06",
+    "status": "Muvaffaqiyatli"
+  },
+  {
+    "id": 5,
+    "filename": "API Sync (2026-08-10 - 2026-08-31)",
+    "rows": 0,
+    "timestamp": "19.08.2026 09:19:23",
+    "status": "401 Unauthorized"
+  },
+  {
+    "id": 4,
+    "filename": "API Sync (2026-08-01 - 2026-08-31)",
+    "rows": 0,
+    "timestamp": "19.08.2026 09:19:13",
+    "status": "401 Unauthorized"
+  },
+  {
+    "id": 3,
+    "filename": "API Sync (2026-08-13 - 2026-08-14)",
+    "rows": 1262983,
+    "timestamp": "14.08.2026 15:50:42",
+    "status": "Muvaffaqiyatli"
+  },
+  {
+    "id": 2,
+    "filename": "API Sync (2026-08-01 - 2026-08-14)",
+    "rows": 0,
+    "timestamp": "14.08.2026 15:49:33",
+    "status": "Xatolik: ('Connection broken: IncompleteRead(8141892 bytes read, 6968708 more expected)', IncompleteRead(8141892 bytes read, 6968708 more expected))"
+  },
+  {
+    "id": 1,
+    "filename": "API Sync (2026-08-13 - 2026-08-14)",
+    "rows": 1678708,
+    "timestamp": "14.08.2026 15:45:17",
+    "status": "Muvaffaqiyatli"
+  }
+]
