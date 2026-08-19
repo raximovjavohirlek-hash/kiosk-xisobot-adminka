@@ -250,22 +250,20 @@ def get_all_official_monthly_reports():
                         reports[ym] = stats
     return reports
 
+STATS_CACHE = None
+
+def invalidate_stats_cache():
+    global STATS_CACHE
+    STATS_CACHE = None
+
 def process_excel(data_path, report_path):
     email_map = load_mappings()
-    
-    # Automatically update official report workbook if raw data.xlsx exists
-    if data_path and os.path.exists(data_path):
-        try:
-            from update_august_report import update_kiosk_report
-            update_kiosk_report(data_path, report_path)
-        except Exception as ex:
-            print("auto update_kiosk_report warning:", ex)
     
     # 1. Load official monthly excel reports as primary source of truth
     monthly_data = get_all_official_monthly_reports()
 
-    # 2. If raw data.xlsx exists and has months not in official reports, add them
-    if data_path and os.path.exists(data_path):
+    # 2. If raw data.xlsx exists and official reports are empty or missing months, add them
+    if (not monthly_data) and data_path and os.path.exists(data_path):
         try:
             df = pd.read_excel(data_path)
             if 'Дата создания' in df.columns:
@@ -539,14 +537,19 @@ def api_sync_page():
 
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
+    global STATS_CACHE
+    if STATS_CACHE is not None:
+        return jsonify({'success': True, 'stats': STATS_CACHE, 'monthly_reports': STATS_CACHE.get('monthly_data', {})})
+
     report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
     data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
     try:
         stats = process_excel(data_path, report_path)
-        all_reports = get_all_official_monthly_reports()
-        return jsonify({'success': True, 'stats': stats, 'monthly_reports': all_reports})
+        STATS_CACHE = stats
+        return jsonify({'success': True, 'stats': stats, 'monthly_reports': stats.get('monthly_data', {})})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        print("get_stats error:", e)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 def safe_filename(filename):
     filename = os.path.basename(filename)
@@ -605,7 +608,10 @@ def upload_file():
                     except Exception:
                         rows_count = 1
 
+        invalidate_stats_cache()
         stats = process_excel(data_path, report_path)
+        global STATS_CACHE
+        STATS_CACHE = stats
         
         add_upload_log(orig_filename, rows_count if rows_count > 0 else 1, "Muvaffaqiyatli")
         
@@ -815,6 +821,7 @@ def handle_mappings():
     if request.method == 'POST':
         new_map = request.json
         save_mappings(new_map)
+        invalidate_stats_cache()
         return jsonify({'success': True, 'message': 'Pochta biriktirmalari saqlandi!'})
     return jsonify({'success': True, 'mappings': load_mappings()})
 
@@ -1124,6 +1131,17 @@ def start_self_ping():
     thread = threading.Thread(target=ping_worker, daemon=True)
     thread.start()
 
+def warmup_stats_cache():
+    try:
+        report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
+        data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
+        global STATS_CACHE
+        STATS_CACHE = process_excel(data_path, report_path)
+        print("[Cache] Stats cache pre-warmed successfully!")
+    except Exception as e:
+        print("[Cache] Pre-warmup warning:", e)
+
+threading.Thread(target=warmup_stats_cache, daemon=True).start()
 start_self_ping()
 
 def open_browser():
