@@ -11,7 +11,7 @@ Loyihada faqat **2 ta asosiy papka** mavjud:
 ```text
 kiosk-xisobot-adminka/
 ├── backend/                  # Python Flask API server
-│   ├── app.py                # Asosiy API kodi (CORS yoqilgan)
+│   ├── app.py                # Asosiy API kodi (CORS va Healthcheck yoqilgan)
 │   ├── requirements.txt      # Backend bog'liqliklari
 │   ├── Procfile              # Production ishga tushirish buyrug'i
 │   ├── data.xlsx             # Tranzaksiyalar bazasi
@@ -98,7 +98,30 @@ O'zgarishni GitHub-ga `git push` qiling.
 
 ---
 
-## 4. Mahalliy (Local) kompyuterda ishga tushirish
+## 4. UptimeRobot Orqali Backend-ni 24/7 Uxlab Qolmasligini Ta'minlash (Keep-Alive)
+
+Render.com bepul tarifida serverga 15 minut davomida so'rov kelmasa, u "uxlab qoladi" (sleep mode). Saytga birinchi kirgan odam server uyg'onishini 30-50 sek kutilishining oldini olish uchun **UptimeRobot** moslashtirilgan.
+
+Backend ilovasiga maxsus eng yengil va tezkor Ping API lari kiritilgan:
+* `https://<your-render-backend-url>/ping`
+* `https://<your-render-backend-url>/healthz`
+* `https://<your-render-backend-url>/api/ping`
+
+### UptimeRobot-da sozlash:
+1. [UptimeRobot.com](https://uptimerobot.com) saytiga bepul ro'yxatdan o'ting.
+2. **Add New Monitor** tugmasini bosing.
+3. Sozlamalarni kiritasiz:
+   * **Monitor Type**: `HTTP(s)`
+   * **Friendly Name**: `Kiosk Backend Ping`
+   * **URL (or IP)**: `https://kiosk-hisobot-backend.onrender.com/ping`
+   * **Monitoring Interval**: `Every 5 minutes` (yoki `10 minutes`)
+4. **Create Monitor** tugmasini bosing.
+
+> **Natija**: UptimeRobot har 5 minutda `/ping` manziliga so'rov yuboradi. Server hech qachon uxlab qolmaydi va frontend foydalanuvchilariga doimo soniyalarda tezkor javob beradi.
+
+---
+
+## 5. Mahalliy (Local) kompyuterda ishga tushirish
 
 Mahalliy kompyuterda sinash uchun:
 
