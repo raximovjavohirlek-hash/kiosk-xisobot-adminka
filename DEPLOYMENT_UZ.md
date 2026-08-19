@@ -47,7 +47,7 @@ git push origin main
 3. GitHub omboringizni tanlang va **Connect** qiling.
 
 ### 3-qadam: Sozlamalarni kiritish
-* **Name**: `kiosk-hisobot-backend`
+* **Name**: `kiosk-xisobot-adminka`
 * **Region**: `Singapore` (yoki o'zingizga maqbul region)
 * **Branch**: `main`
 * **Root Directory**: `backend` *(Muhim: `backend` deb kiriting)*
@@ -63,7 +63,7 @@ git push origin main
 
 ### 5-qadam: Deploy
 **Create Web Service** tugmasini bosing. 2-3 minutda server ishga tushadi va sizga domen beriladi:
-> **Backend URL**: `https://kiosk-hisobot-backend.onrender.com`
+> **Backend URL**: `https://kiosk-xisobot-adminka.onrender.com`
 
 ---
 
@@ -75,7 +75,7 @@ git push origin main
 ```javascript
 const API_BASE_URL = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.protocol === 'file:'))
     ? 'http://127.0.0.1:5050'
-    : 'https://kiosk-hisobot-backend.onrender.com'; // <-- Render havolasi
+    : 'https://kiosk-xisobot-adminka.onrender.com'; // <-- Render havolasi
 ```
 
 O'zgarishni GitHub-ga `git push` qiling.
@@ -103,9 +103,9 @@ O'zgarishni GitHub-ga `git push` qiling.
 Render.com bepul tarifida serverga 15 minut davomida so'rov kelmasa, u "uxlab qoladi" (sleep mode). Saytga birinchi kirgan odam server uyg'onishini 30-50 sek kutilishining oldini olish uchun **UptimeRobot** moslashtirilgan.
 
 Backend ilovasiga maxsus eng yengil va tezkor Ping API lari kiritilgan:
-* `https://<your-render-backend-url>/ping`
-* `https://<your-render-backend-url>/healthz`
-* `https://<your-render-backend-url>/api/ping`
+* `https://kiosk-xisobot-adminka.onrender.com/ping`
+* `https://kiosk-xisobot-adminka.onrender.com/healthz`
+* `https://kiosk-xisobot-adminka.onrender.com/api/ping`
 
 ### UptimeRobot-da sozlash:
 1. [UptimeRobot.com](https://uptimerobot.com) saytiga bepul ro'yxatdan o'ting.
@@ -113,7 +113,7 @@ Backend ilovasiga maxsus eng yengil va tezkor Ping API lari kiritilgan:
 3. Sozlamalarni kiritasiz:
    * **Monitor Type**: `HTTP(s)`
    * **Friendly Name**: `Kiosk Backend Ping`
-   * **URL (or IP)**: `https://kiosk-hisobot-backend.onrender.com/ping`
+   * **URL (or IP)**: `https://kiosk-xisobot-adminka.onrender.com/ping`
    * **Monitoring Interval**: `Every 5 minutes` (yoki `10 minutes`)
 4. **Create Monitor** tugmasini bosing.
 
