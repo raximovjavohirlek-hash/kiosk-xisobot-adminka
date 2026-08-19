@@ -153,7 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
         exportStationExcelBtn.addEventListener('click', () => {
             if (!currentActiveModalStation) return;
             showToast('info', 'Excel Yuklanmoqda...', `${currentActiveModalStation} kassa (${currentSelectedModalMonth}) hisoboti yuklanmoqda`);
-            window.location.href = `/api/export-station-excel/${encodeURIComponent(currentActiveModalStation)}?month=${currentSelectedModalMonth}`;
+            window.location.href = getApiUrl(`/api/export-station-excel/${encodeURIComponent(currentActiveModalStation)}?month=${currentSelectedModalMonth}`);
         });
     }
     if (stationDetailModal) {
@@ -323,6 +323,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // API Sync Link
+    const apiSyncLink = document.getElementById('apiSyncLink');
+    if (apiSyncLink) apiSyncLink.href = getApiUrl('/api-sync');
+
     // Share Modal
     if (shareUrlBtn) {
         shareUrlBtn.addEventListener('click', () => {
@@ -420,7 +424,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        fetch('/api/admin/login', {
+        fetch(getApiUrl('/api/admin/login'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ password: pwd })
@@ -616,7 +620,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (dropzoneContent) dropzoneContent.style.display = 'none';
         if (uploadSpinner) uploadSpinner.style.display = 'flex';
 
-        fetch('/api/upload', {
+        fetch(getApiUrl('/api/upload'), {
             method: 'POST',
             body: formData
         })
@@ -642,7 +646,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function fetchStats() {
-        fetch('/api/stats')
+        fetch(getApiUrl('/api/stats'))
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
@@ -656,7 +660,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function fetchMappings() {
-        fetch('/api/mappings')
+        fetch(getApiUrl('/api/mappings'))
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
@@ -667,7 +671,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function fetchUploadLogs() {
-        fetch('/api/upload-logs')
+        fetch(getApiUrl('/api/upload-logs'))
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
@@ -695,7 +699,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        fetch('/api/mappings', {
+        fetch(getApiUrl('/api/mappings'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(newMap)
@@ -1730,7 +1734,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function loadTokenData() {
         if (!isAdminLoggedIn) return;
-        fetch('/api/admin/token')
+        fetch(getApiUrl('/api/admin/token'))
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
@@ -1756,7 +1760,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const icon = checkTokenHealthBtn ? checkTokenHealthBtn.querySelector('i') : null;
         if (icon) icon.classList.add('fa-spin');
 
-        fetch('/api/admin/token-health')
+        fetch(getApiUrl('/api/admin/token-health'))
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
@@ -1790,7 +1794,7 @@ document.addEventListener('DOMContentLoaded', () => {
         saveTokenBtn.disabled = true;
         saveTokenBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...';
 
-        fetch('/api/admin/token', {
+        fetch(getApiUrl('/api/admin/token'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ token: tokenVal, csrf_token: csrfVal })
@@ -1829,7 +1833,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchApiDataBtn.disabled = true;
         fetchApiDataBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Yuklanmoqda...';
 
-        fetch('/api/admin/fetch-api-excel', {
+        fetch(getApiUrl('/api/admin/fetch-api-excel'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ startDate: startDate, endDate: endDate, token: customToken, csrf_token: customCsrf })
