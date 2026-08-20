@@ -3,6 +3,9 @@ import os
 import json
 import re
 import hashlib
+import io
+import pandas as pd
+import openpyxl
 
 def get_db_connection(db_path):
     conn = sqlite3.connect(db_path)
@@ -163,6 +166,7 @@ def batch_upsert_tickets(db_path, ticket_list, batch_size=1000):
     except Exception as ex:
         print("batch_upsert_tickets error:", ex)
         conn.rollback()
+        skipped_count = total_read
     finally:
         conn.close()
 
@@ -172,63 +176,142 @@ def batch_upsert_tickets(db_path, ticket_list, batch_size=1000):
         'skipped': skipped_count
     }
 
-def get_paginated_tickets_from_db(db_path, page=1, per_page=20, search='', station='', ym=''):
-    init_db(db_path)
-    if not os.path.exists(db_path):
-        return {'tickets': [], 'total_count': 0, 'page': page, 'per_page': per_page, 'total_pages': 0}
-
-    conn = get_db_connection(db_path)
-    cursor = conn.cursor()
-
+def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
+    """
+    In-memory BytesIO Excel parser with Header Normalization, Missing Column Validation,
+    and Idempotent SQLite Database Transaction.
+    
+    file_input: bytes, io.BytesIO, or file_path string
+    Returns dict: {'status': 'success'|'error', 'message': str, 'metrics': dict}
+    """
     try:
-        query_conditions = ["1=1"]
-        params = []
+        init_db(db_path)
 
-        if search:
-            query_conditions.append("(ticket_number LIKE ? OR order_id LIKE ? OR station_name LIKE ? OR user_email LIKE ?)")
-            s_param = f"%{search}%"
-            params.extend([s_param, s_param, s_param, s_param])
+        if isinstance(file_input, bytes):
+            stream = io.BytesIO(file_input)
+        elif isinstance(file_input, io.BytesIO):
+            stream = file_input
+        else:
+            with open(file_input, 'rb') as f:
+                stream = io.BytesIO(f.read())
 
-        if station:
-            query_conditions.append("station_name = ?")
-            params.append(station)
+        # Load Excel sheets
+        try:
+            xl = pd.ExcelFile(stream)
+        except Exception as read_ex:
+            return {
+                'status': 'error',
+                'message': f"Excel faylini o'qib bo'lmadi: {str(read_ex)}"
+            }
 
-        if ym:
-            query_conditions.append("ym = ?")
-            params.append(ym)
+        sheet_name = xl.sheet_names[0]
+        
+        # Read header scan to locate actual data header row
+        df_scan = pd.read_excel(xl, sheet_name=sheet_name, nrows=10, header=None)
+        
+        header_row_idx = 0
+        found_header = False
+        
+        keywords = ['дата', 'sana', 'date', 'пользователь', 'user', 'email', 'kassa', 'количество', 'soni', 'стоимость', 'summa', 'номер']
+        for r_idx in range(len(df_scan)):
+            row_vals = [str(v).strip().lower() for v in df_scan.iloc[r_idx].values if pd.notnull(v)]
+            matches = sum(1 for v in row_vals if any(k in v for k in keywords))
+            if matches >= 2:
+                header_row_idx = r_idx
+                found_header = True
+                break
 
-        where_clause = " WHERE " + " AND ".join(query_conditions)
+        df = pd.read_excel(xl, sheet_name=sheet_name, skiprows=header_row_idx if found_header else 0)
+        
+        # Column normalization: strip whitespace and map case-insensitively
+        norm_columns = {}
+        for original_col in df.columns:
+            clean_col = str(original_col).strip()
+            norm_columns[clean_col.lower()] = original_col
 
-        cursor.execute(f"SELECT COUNT(*) FROM tickets {where_clause}", params)
-        total_count = cursor.fetchone()[0]
+        def find_col(possible_keys):
+            for k in possible_keys:
+                k_clean = k.strip().lower()
+                if k_clean in norm_columns:
+                    return norm_columns[k_clean]
+                for actual_lower, orig in norm_columns.items():
+                    if k_clean in actual_lower:
+                        return orig
+            return None
 
-        total_pages = (total_count + per_page - 1) // per_page if total_count > 0 else 0
-        offset = (page - 1) * per_page
+        ticket_col = find_col(['номер билета', 'chipta raqami', 'ticket number', 'ticket_number', 'id заказа', 'order_id'])
+        date_col = find_col(['дата создания', 'дата', 'date', 'sana', 'created_at', 'кун'])
+        user_col = find_col(['пользователь', 'user', 'email', 'pochta', 'kassa'])
+        qty_col = find_col(['количество билетов', 'количество', 'soni', 'tickets'])
+        sum_col = find_col(['общая стоимость', 'стоимость', 'summa', 'amount', 'total', 'жами'])
+        pay_col = find_col(['способ оплаты', 'оплата', 'paymenttype', 'payment_type'])
 
-        cursor.execute(f'''
-            SELECT ticket_number, order_id, date_str, ym, user_email, station_name,
-                   payment_type, qty, summa, status, uploaded_at
-            FROM tickets
-            {where_clause}
-            ORDER BY date_str DESC, ticket_number DESC
-            LIMIT ? OFFSET ?
-        ''', params + [per_page, offset])
+        # Validate required columns
+        missing_cols = []
+        if not date_col:
+            missing_cols.append("Sana (Дата / Date / Sana)")
+        if not (user_col or sum_col or qty_col):
+            missing_cols.append("Kassa / Tushum (Пользователь / Summa)")
 
-        tickets = [dict(r) for r in cursor.fetchall()]
-        conn.close()
+        if missing_cols and 'Худудлар' not in xl.sheet_names:
+            return {
+                'status': 'error',
+                'message': f"Excel faylida kerakli ustunlar topilmadi: {', '.join(missing_cols)}. Iltimos, ustunlar sarlavhasini tekshiring."
+            }
 
+        ticket_rows = []
+        for idx, row in df.iterrows():
+            d_val = row.get(date_col) if date_col else None
+            if pd.notnull(d_val):
+                if hasattr(d_val, 'strftime'):
+                    d_str = d_val.strftime('%d.%m.%Y')
+                else:
+                    d_str = str(d_val).split(' ')[0].strip()
+            else:
+                d_str = ''
+
+            u_val = str(row.get(user_col) if user_col else '').strip()
+            st_name = email_map.get(u_val, {}).get('station', u_val or 'Noma\'lum') if email_map else u_val
+            
+            try:
+                q_val = int(re.sub(r'[^\d\-]', '', str(row.get(qty_col)))) if qty_col and pd.notnull(row.get(qty_col)) else 1
+            except Exception:
+                q_val = 1
+
+            try:
+                s_val = float(re.sub(r'[^\d\-.]', '', str(row.get(sum_col)))) if sum_col and pd.notnull(row.get(sum_col)) else 0.0
+            except Exception:
+                s_val = 0.0
+
+            p_val = str(row.get(pay_col) if pay_col else 'Terminal')
+            p_type = 'Online' if any(k in p_val.lower() for k in ['online', 'онлайн', 'click', 'payme', 'uzum']) else 'Terminal'
+            t_num = str(row.get(ticket_col) if ticket_col and pd.notnull(row.get(ticket_col)) else '').strip()
+
+            if d_str or s_val > 0 or q_val > 0:
+                ticket_rows.append({
+                    'ticket_number': t_num,
+                    'order_id': t_num,
+                    'date_str': d_str,
+                    'user_email': u_val,
+                    'station_name': st_name,
+                    'payment_type': p_type,
+                    'qty': q_val if q_val > 0 else 1,
+                    'summa': s_val,
+                    'status': 'ACTIVE'
+                })
+
+        metrics = batch_upsert_tickets(db_path, ticket_rows)
         return {
-            'tickets': tickets,
-            'total_count': total_count,
-            'page': page,
-            'per_page': per_page,
-            'total_pages': total_pages
+            'status': 'success',
+            'message': f"Fayl muvaffaqiyatli ishlandi va ma'lumotlar bazasiga saqlandi! ({metrics['inserted']} ta yangi, {metrics['skipped']} ta dublikat o'tkazib yuborildi)",
+            'metrics': metrics
         }
 
     except Exception as ex:
-        print("get_paginated_tickets_from_db error:", ex)
-        conn.close()
-        return {'tickets': [], 'total_count': 0, 'page': page, 'per_page': per_page, 'total_pages': 0}
+        return {
+            'status': 'error',
+            'message': f"Excel faylini tahlil qilishda kutilmagan xatolik: {str(ex)}"
+        }
 
 def save_monthly_report_to_db(db_path, ym, stats):
     if not ym or not stats:
@@ -242,7 +325,6 @@ def save_monthly_report_to_db(db_path, ym, stats):
         t_tickets = stats.get('total_tickets', 0)
         t_summa = stats.get('total_summa', 0)
 
-        # 1. Upsert Monthly Summary
         cursor.execute('''
             INSERT INTO monthly_summaries (ym, total_tickets, total_summa, updated_at)
             VALUES (?, ?, ?, CURRENT_TIMESTAMP)
@@ -252,7 +334,6 @@ def save_monthly_report_to_db(db_path, ym, stats):
                 updated_at = CURRENT_TIMESTAMP
         ''', (ym, t_tickets, t_summa))
 
-        # 2. Upsert Station Monthly Stats
         for st in stats.get('stations', []):
             st_name = st.get('stansiya', '')
             email = st.get('email', '')
@@ -270,7 +351,6 @@ def save_monthly_report_to_db(db_path, ym, stats):
                     share_percent = excluded.share_percent
             ''', (ym, st_name, email, soni, summa, sh_pct))
 
-            # Station daily breakdown if available
             for d_item in st.get('daily_breakdown', []):
                 d_str = d_item.get('date')
                 d_tix = d_item.get('tickets', 0)
@@ -284,7 +364,6 @@ def save_monthly_report_to_db(db_path, ym, stats):
                             summa = excluded.summa
                     ''', (ym, d_str, email, d_tix, d_sum))
 
-        # 3. Upsert Daily Stats
         for d in stats.get('daily_trend', []):
             d_str = d.get('date')
             if d_str:
@@ -448,3 +527,61 @@ def get_all_stats_from_db(db_path, email_map):
         print("get_all_stats_from_db error:", ex)
         conn.close()
         return None
+
+def get_paginated_tickets_from_db(db_path, page=1, per_page=20, search='', station='', ym=''):
+    init_db(db_path)
+    if not os.path.exists(db_path):
+        return {'tickets': [], 'total_count': 0, 'page': page, 'per_page': per_page, 'total_pages': 0}
+
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+
+    try:
+        query_conditions = ["1=1"]
+        params = []
+
+        if search:
+            query_conditions.append("(ticket_number LIKE ? OR order_id LIKE ? OR station_name LIKE ? OR user_email LIKE ?)")
+            s_param = f"%{search}%"
+            params.extend([s_param, s_param, s_param, s_param])
+
+        if station:
+            query_conditions.append("station_name = ?")
+            params.append(station)
+
+        if ym:
+            query_conditions.append("ym = ?")
+            params.append(ym)
+
+        where_clause = " WHERE " + " AND ".join(query_conditions)
+
+        cursor.execute(f"SELECT COUNT(*) FROM tickets {where_clause}", params)
+        total_count = cursor.fetchone()[0]
+
+        total_pages = (total_count + per_page - 1) // per_page if total_count > 0 else 0
+        offset = (page - 1) * per_page
+
+        cursor.execute(f'''
+            SELECT ticket_number, order_id, date_str, ym, user_email, station_name,
+                   payment_type, qty, summa, status, uploaded_at
+            FROM tickets
+            {where_clause}
+            ORDER BY date_str DESC, ticket_number DESC
+            LIMIT ? OFFSET ?
+        ''', params + [per_page, offset])
+
+        tickets = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+
+        return {
+            'tickets': tickets,
+            'total_count': total_count,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': total_pages
+        }
+
+    except Exception as ex:
+        print("get_paginated_tickets_from_db error:", ex)
+        conn.close()
+        return {'tickets': [], 'total_count': 0, 'page': page, 'per_page': per_page, 'total_pages': 0}

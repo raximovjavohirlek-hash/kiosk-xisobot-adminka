@@ -668,145 +668,71 @@ def safe_filename(filename):
 
 @app.route('/api/upload', methods=['POST'])
 def upload_file():
-    if 'file' not in request.files:
-        return jsonify({'success': False, 'error': 'Fayl tanlanmagan'}), 400
-    
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'success': False, 'error': 'Fayl tanlanmagan'}), 400
-
-    orig_filename = file.filename
-    filename = safe_filename(orig_filename)
-    save_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-
     try:
-        file.save(save_path)
+        if 'file' not in request.files:
+            return jsonify({'status': 'error', 'message': 'Fayl tanlanmagan'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'status': 'error', 'message': 'Fayl tanlanmagan'}), 400
+
+        orig_filename = file.filename
+        filename = safe_filename(orig_filename)
+        save_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+
+        file_bytes = file.read()
+        if not file_bytes:
+            return jsonify({'status': 'error', 'message': "Fayl bo'sh bo'lishi mumkin emas"}), 400
+
+        # Save copy to disk
+        with open(save_path, 'wb') as f_out:
+            f_out.write(file_bytes)
 
         report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
         data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
 
-        import zipfile
-        if not os.path.exists(report_path) or not zipfile.is_zipfile(report_path):
-            ex_backup = os.path.join(app.config['UPLOAD_FOLDER'], 'excellar', 'Август кисока.xlsx')
-            if os.path.exists(ex_backup) and zipfile.is_zipfile(ex_backup):
-                safe_copy_file(ex_backup, report_path)
+        db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+        email_map = load_mappings()
 
         fn_lower = filename.lower()
         orig_lower = orig_filename.lower()
         is_rep = is_monthly_report_excel(save_path) or ('кисока' in orig_lower or 'киоска' in orig_lower or 'кисока' in fn_lower or 'киоска' in fn_lower)
-        
-        db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
-        upload_metrics = {'total_read': 0, 'inserted': 0, 'skipped': 0}
 
         if is_rep:
             ex_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'excellar')
             os.makedirs(ex_dir, exist_ok=True)
             safe_copy_file(save_path, os.path.join(ex_dir, filename))
             safe_copy_file(save_path, report_path)
-
-            try:
-                from database import batch_upsert_tickets
-                fname_b = os.path.basename(save_path)
-                ym_b, rep_stats_b = parse_report_file(save_path, fname_b)
-                if ym_b and rep_stats_b and rep_stats_b.get('stations'):
-                    t_list = []
-                    for st in rep_stats_b['stations']:
-                        st_name = st.get('stansiya', 'Noma\'lum')
-                        u_email = st.get('email', '')
-                        for d_item in st.get('daily_breakdown', []):
-                            d_str = d_item.get('date', '')
-                            t_qty = d_item.get('tickets', 0)
-                            t_sum = d_item.get('summa', 0)
-                            if d_str and (t_qty > 0 or t_sum > 0):
-                                t_list.append({
-                                    'ticket_number': f"TICK_{ym_b}_{u_email}_{d_str}",
-                                    'order_id': f"ORD_{ym_b}_{u_email}_{d_str}",
-                                    'date_str': d_str,
-                                    'ym': ym_b,
-                                    'user_email': u_email,
-                                    'station_name': st_name,
-                                    'payment_type': 'Terminal',
-                                    'qty': t_qty,
-                                    'summa': t_sum,
-                                    'status': 'ACTIVE'
-                                })
-                    if t_list:
-                        upload_metrics = batch_upsert_tickets(db_path, t_list)
-            except Exception as ex_rep_tix:
-                print("[Upload] Report ticket upsert warning:", ex_rep_tix)
         else:
             safe_copy_file(save_path, data_path)
             backend_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'backend')
             if os.path.exists(backend_dir):
                 safe_copy_file(save_path, os.path.join(backend_dir, 'data.xlsx'))
-            
-            # Extract individual ticket rows for Idempotent Database Storage
-            try:
-                from database import batch_upsert_tickets
-                df = pd.read_excel(save_path)
-                df.columns = [str(c).strip() for c in df.columns]
-                
-                ticket_col = next((c for c in ['Номер билета', 'Chipta raqami', 'Ticket Number', 'ticket_number', 'ID', 'ID заказа', 'order_id'] if c in df.columns), None)
-                order_col = next((c for c in ['ID заказа', 'Номер заказа', 'order_id', 'Order ID', 'ID'] if c in df.columns), None)
-                date_col = next((c for c in ['Дата создания', 'Дата', 'Date', 'Sana', 'sana', 'created_at'] if c in df.columns), None)
-                user_col = next((c for c in ['Пользователь', 'User', 'Email', 'pochta', 'Pochta', 'Kassa'] if c in df.columns), None)
-                qty_col = next((c for c in ['Количество билетов', 'Количество', 'Soni', 'soni', 'Tickets'] if c in df.columns), None)
-                sum_col = next((c for c in ['Общая стоимость', 'Стоимость', 'Summa', 'summa', 'Amount', 'Total'] if c in df.columns), None)
-                pay_col = next((c for c in ['Способ оплаты', 'Оплата', 'PaymentType', 'payment_type'] if c in df.columns), None)
 
-                ticket_rows = []
-                email_map = load_mappings()
-                
-                for idx, row in df.iterrows():
-                    d_val = row.get(date_col) if date_col else None
-                    if pd.notnull(d_val):
-                        if hasattr(d_val, 'strftime'):
-                            d_str = d_val.strftime('%d.%m.%Y')
-                        else:
-                            d_str = str(d_val).split(' ')[0]
-                    else:
-                        d_str = ''
-
-                    u_val = str(row.get(user_col) if user_col else '').strip()
-                    st_name = email_map.get(u_val, {}).get('station', u_val or 'Noma\'lum')
-                    q_val = clean_int(str(row.get(qty_col))) if qty_col else 1
-                    s_val = clean_int(str(row.get(sum_col))) if sum_col else 0
-                    p_val = str(row.get(pay_col) if pay_col else 'Terminal')
-                    p_type = 'Online' if p_val in ONLINE_PAYMENTS else 'Terminal'
-                    t_num = str(row.get(ticket_col) if ticket_col else '').strip()
-                    o_id = str(row.get(order_col) if order_col else t_num).strip()
-
-                    ticket_rows.append({
-                        'ticket_number': t_num,
-                        'order_id': o_id,
-                        'date_str': d_str,
-                        'user_email': u_val,
-                        'station_name': st_name,
-                        'payment_type': p_type,
-                        'qty': q_val if q_val > 0 else 1,
-                        'summa': s_val,
-                        'status': 'ACTIVE'
-                    })
-
-                if ticket_rows:
-                    upload_metrics = batch_upsert_tickets(db_path, ticket_rows)
-            except Exception as ex_tix:
-                print("[Upload] Ticket upsert warning:", ex_tix)
+        # Smart In-Memory Excel Parsing & Idempotent SQLite Database Transaction
+        from database import smart_parse_and_save_excel
+        parse_result = smart_parse_and_save_excel(db_path, file_bytes, orig_filename, email_map)
+        
+        if parse_result.get('status') == 'error' and not is_rep:
+            add_upload_log(orig_filename, 0, f"Xatolik: {parse_result.get('message')}")
+            return jsonify({'status': 'error', 'message': parse_result.get('message')}), 400
 
         invalidate_stats_cache()
         stats = process_excel(data_path, report_path, uploaded_path=save_path)
         global STATS_CACHE
         STATS_CACHE = stats
         
-        tot_read = upload_metrics.get('total_read', 1)
-        n_ins = upload_metrics.get('inserted', 1)
-        n_skip = upload_metrics.get('skipped', 0)
+        metrics = parse_result.get('metrics', {})
+        tot_read = metrics.get('total_read', 1)
+        n_ins = metrics.get('inserted', 1)
+        n_skip = metrics.get('skipped', 0)
         
         add_upload_log(orig_filename, tot_read, "Muvaffaqiyatli")
         
         return jsonify({
-            'success': True, 
-            'message': f"Fayl muvaffaqiyatli yuklandi va ma'lumotlar bazasiga saqlandi! ({n_ins} ta yangi qo'shildi, {n_skip} ta dublikat o'tkazib yuborildi)", 
+            'status': 'success',
+            'success': True,
+            'message': parse_result.get('message', "Fayl muvaffaqiyatli yuklandi va ma'lumotlar bazasiga saqlandi!"), 
             'upload_stats': {
                 'total_rows_read': tot_read,
                 'new_tickets_inserted': n_ins,
@@ -815,8 +741,9 @@ def upload_file():
             'stats': stats
         })
     except Exception as e:
-        add_upload_log(orig_filename, 0, f"Xatolik: {str(e)}")
-        return jsonify({'success': False, 'error': f"Xatolik yuz berdi: {str(e)}"}), 500
+        fn = request.files['file'].filename if 'file' in request.files else 'unknown'
+        add_upload_log(fn, 0, f"Xatolik: {str(e)}")
+        return jsonify({'status': 'error', 'message': f"Fayl yuklashda server xatoligi yuz berdi: {str(e)}"}), 500
 
 @app.route('/api/tickets', methods=['GET'])
 def get_tickets():
