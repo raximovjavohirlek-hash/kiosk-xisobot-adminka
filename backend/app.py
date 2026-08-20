@@ -1,3 +1,19 @@
+import re
+
+def clean_int(val):
+    if val is None:
+        return 0
+    if isinstance(val, (int, float)):
+        return int(val)
+    if isinstance(val, str):
+        cleaned = re.sub(r'[^\d\-]', '', val)
+        if cleaned:
+            try:
+                return int(cleaned)
+            except Exception:
+                pass
+    return 0
+
 import os
 import sys
 import json
@@ -180,13 +196,17 @@ def parse_report_file(fpath, fname):
 
         for r in range(4, 35):
             row_date = ws_h.cell(r, 1).value
-            if not row_date:
-                break
             if isinstance(row_date, str):
                 s_val = row_date.strip().lower()
                 if 'жам' in s_val or 'jam' in s_val or 'total' in s_val:
                     break
-            d_str = row_date.strftime('%d.%m.%Y') if hasattr(row_date, 'strftime') else str(row_date)
+            if not row_date:
+                m_num = ym_code.split('-')[1]
+                y_num = ym_code.split('-')[0]
+                day_num = r - 3
+                d_str = f"{day_num:02d}.{m_num}.{y_num}"
+            else:
+                d_str = row_date.strftime('%d.%m.%Y') if hasattr(row_date, 'strftime') else str(row_date)
 
             day_tickets = 0
             day_summa = 0
@@ -198,10 +218,8 @@ def parse_report_file(fpath, fname):
                     c_soni = meta['col_soni']
                     c_summa = meta['col_summa']
 
-                v_soni = ws_h.cell(r, c_soni).value or 0
-                v_summa = ws_h.cell(r, c_summa).value or 0
-                try: v_soni = int(v_soni); v_summa = int(v_summa)
-                except Exception: v_soni, v_summa = 0, 0
+                v_soni = clean_int(ws_h.cell(r, c_soni).value)
+                v_summa = clean_int(ws_h.cell(r, c_summa).value)
 
                 station_totals[email]['tickets'] += v_soni
                 station_totals[email]['summa'] += v_summa
@@ -218,10 +236,10 @@ def parse_report_file(fpath, fname):
             raw_term_t = ws_j.cell(r, 6).value if ws_j else 0
             raw_term_s = ws_j.cell(r, 7).value if ws_j else 0
 
-            term_t = int(raw_term_t) if isinstance(raw_term_t, (int, float)) else 0
-            term_s = int(raw_term_s) if isinstance(raw_term_s, (int, float)) else 0
-            on_t = int(raw_on_t) if isinstance(raw_on_t, (int, float)) else max(0, day_tickets - term_t)
-            on_s = int(raw_on_s) if isinstance(raw_on_s, (int, float)) else max(0, day_summa - term_s)
+            term_t = clean_int(raw_term_t)
+            term_s = clean_int(raw_term_s)
+            on_t = clean_int(raw_on_t) if raw_on_t else max(0, day_tickets - term_t)
+            on_s = clean_int(raw_on_s) if raw_on_s else max(0, day_summa - term_s)
 
             daily_trend.append({
                 'date': d_str, 'tickets': day_tickets, 'summa': day_summa,
@@ -288,94 +306,115 @@ def invalidate_stats_cache():
     global STATS_CACHE
     STATS_CACHE = None
 
-def process_excel(data_path, report_path):
+def process_excel(data_path, report_path, uploaded_path=None):
     email_map = load_mappings()
     
-    # 1. Load official monthly excel reports as primary source of truth
+    # 1. Load official monthly excel reports from backend/excellar
     monthly_data = get_all_official_monthly_reports()
 
-    # 2. If raw data.xlsx exists and official reports are empty or missing months, add them
-    if (not monthly_data) and data_path and os.path.exists(data_path):
-        try:
-            df = pd.read_excel(data_path)
-            if 'Дата создания' in df.columns:
-                df['Дата создания_dt'] = pd.to_datetime(df['Дата создания'], errors='coerce')
-                df['Date'] = df['Дата создания_dt'].dt.date
-                df['YearMonth'] = df['Дата создания_dt'].dt.strftime('%Y-%m')
-                
-                kiosk_df = df[df['Пользователь'].isin(email_map.keys())].copy()
-                kiosk_df['PaymentType'] = kiosk_df['Способ оплаты'].apply(
-                    lambda x: 'Online' if x in ONLINE_PAYMENTS else 'Terminal'
-                )
-                
-                unique_periods = sorted([p for p in kiosk_df['YearMonth'].dropna().unique()], reverse=True)
-                for ym in unique_periods:
-                    if ym in monthly_data:
-                        continue
-                    m_kiosk_df = kiosk_df[kiosk_df['YearMonth'] == ym]
+    # 2. Try parsing uploaded files as official monthly report files
+    raw_candidates = [uploaded_path, data_path, report_path]
+    candidate_paths = []
+    for cp in raw_candidates:
+        if cp and os.path.exists(cp):
+            abs_p = os.path.abspath(cp)
+            if abs_p not in candidate_paths:
+                candidate_paths.append(abs_p)
+
+    for cp in candidate_paths:
+        fname = os.path.basename(cp)
+        fn_lower = fname.lower()
+        if fn_lower.startswith(('data', 'orders', 'export')) and ('киоска' not in fn_lower and 'кисока' not in fn_lower):
+            continue
+        ym, rep_stats = parse_report_file(cp, fname)
+        if ym and rep_stats:
+            existing_tix = monthly_data.get(ym, {}).get('total_tickets', 0)
+            if ym not in monthly_data or rep_stats.get('total_tickets', 0) >= existing_tix:
+                monthly_data[ym] = rep_stats
+
+    # 3. Try parsing uploaded files as raw transaction data
+    for cp in candidate_paths:
+        if cp and os.path.exists(cp):
+            try:
+                df = pd.read_excel(cp)
+                if 'Дата создания' in df.columns:
+                    df['Дата создания_dt'] = pd.to_datetime(df['Дата создания'], errors='coerce')
+                    df['Date'] = df['Дата создания_dt'].dt.date
+                    df['YearMonth'] = df['Дата создания_dt'].dt.strftime('%Y-%m')
                     
-                    m_grouped_station = m_kiosk_df.groupby(['Date', 'Пользователь']).agg(
-                        tickets=('Количество билетов', 'sum'),
-                        summa=('Общая стоимость', 'sum')
-                    ).reset_index()
+                    kiosk_df = df[df['Пользователь'].isin(email_map.keys())].copy()
+                    kiosk_df['PaymentType'] = kiosk_df['Способ оплаты'].apply(
+                        lambda x: 'Online' if x in ONLINE_PAYMENTS else 'Terminal'
+                    )
                     
-                    m_grouped_payment = m_kiosk_df.groupby(['Date', 'PaymentType']).agg(
-                        tickets=('Количество билетов', 'sum'),
-                        summa=('Общая стоимость', 'sum')
-                    ).reset_index()
-                    
-                    m_station_sums = []
-                    for email, meta in email_map.items():
-                        st_name = meta['station']
-                        m_match = m_grouped_station[m_grouped_station['Пользователь'] == email]
-                        soni_val = int(m_match['tickets'].sum()) if not m_match.empty else 0
-                        summa_val = int(m_match['summa'].sum()) if not m_match.empty else 0
-                        m_station_sums.append({
-                            'stansiya': st_name,
-                            'email': email,
-                            'soni_val': soni_val,
-                            'summa_val': summa_val
-                        })
+                    unique_periods = sorted([p for p in kiosk_df['YearMonth'].dropna().unique()], reverse=True)
+                    for ym in unique_periods:
+                        m_kiosk_df = kiosk_df[kiosk_df['YearMonth'] == ym]
                         
-                    m_by_summa = sorted(m_station_sums, key=lambda x: x['summa_val'], reverse=True)
-                    m_total_tickets = sum(s['soni_val'] for s in m_station_sums)
-                    m_total_summa = sum(s['summa_val'] for s in m_station_sums)
-                    
-                    m_daily_trend = []
-                    all_dates_in_m = sorted(m_kiosk_df['Date'].dropna().unique())
-                    for d in all_dates_in_m:
-                        d_str = d.strftime('%d.%m.%Y')
-                        d_st_df = m_grouped_station[m_grouped_station['Date'] == d]
-                        d_tickets = int(d_st_df['tickets'].sum())
-                        d_summa = int(d_st_df['summa'].sum())
+                        m_grouped_station = m_kiosk_df.groupby(['Date', 'Пользователь']).agg(
+                            tickets=('Количество билетов', 'sum'),
+                            summa=('Общая стоимость', 'sum')
+                        ).reset_index()
                         
-                        d_pay_df = m_grouped_payment[m_grouped_payment['Date'] == d]
-                        on_row = d_pay_df[d_pay_df['PaymentType'] == 'Online']
-                        term_row = d_pay_df[d_pay_df['PaymentType'] == 'Terminal']
+                        m_grouped_payment = m_kiosk_df.groupby(['Date', 'PaymentType']).agg(
+                            tickets=('Количество билетов', 'sum'),
+                            summa=('Общая стоимость', 'sum')
+                        ).reset_index()
                         
-                        on_t = int(on_row['tickets'].values[0]) if not on_row.empty else 0
-                        on_s = int(on_row['summa'].values[0]) if not on_row.empty else 0
-                        term_t = int(term_row['tickets'].values[0]) if not term_row.empty else 0
-                        term_s = int(term_row['summa'].values[0]) if not term_row.empty else 0
+                        m_station_sums = []
+                        for email, meta in email_map.items():
+                            st_name = meta['station']
+                            m_match = m_grouped_station[m_grouped_station['Пользователь'] == email]
+                            soni_val = int(m_match['tickets'].sum()) if not m_match.empty else 0
+                            summa_val = int(m_match['summa'].sum()) if not m_match.empty else 0
+                            m_station_sums.append({
+                                'stansiya': st_name,
+                                'email': email,
+                                'soni_val': soni_val,
+                                'summa_val': summa_val
+                            })
+                            
+                        m_by_summa = sorted(m_station_sums, key=lambda x: x['summa_val'], reverse=True)
+                        m_total_tickets = sum(s['soni_val'] for s in m_station_sums)
+                        m_total_summa = sum(s['summa_val'] for s in m_station_sums)
                         
-                        m_daily_trend.append({
-                            'date': d_str,
-                            'tickets': d_tickets,
-                            'summa': d_summa,
-                            'online_tickets': on_t,
-                            'online_summa': on_s,
-                            'terminal_tickets': term_t,
-                            'terminal_summa': term_s
-                        })
-                        
-                    monthly_data[ym] = {
-                        'total_tickets': m_total_tickets,
-                        'total_summa': m_total_summa,
-                        'stations': m_by_summa,
-                        'daily_trend': m_daily_trend
-                    }
-        except Exception as ex:
-            print("data_path parse warning:", ex)
+                        m_daily_trend = []
+                        all_dates_in_m = sorted(m_kiosk_df['Date'].dropna().unique())
+                        for d in all_dates_in_m:
+                            d_str = d.strftime('%d.%m.%Y')
+                            d_st_df = m_grouped_station[m_grouped_station['Date'] == d]
+                            d_tickets = int(d_st_df['tickets'].sum())
+                            d_summa = int(d_st_df['summa'].sum())
+                            
+                            d_pay_df = m_grouped_payment[m_grouped_payment['Date'] == d]
+                            on_row = d_pay_df[d_pay_df['PaymentType'] == 'Online']
+                            term_row = d_pay_df[d_pay_df['PaymentType'] == 'Terminal']
+                            
+                            on_t = int(on_row['tickets'].values[0]) if not on_row.empty else 0
+                            on_s = int(on_row['summa'].values[0]) if not on_row.empty else 0
+                            term_t = int(term_row['tickets'].values[0]) if not term_row.empty else 0
+                            term_s = int(term_row['summa'].values[0]) if not term_row.empty else 0
+                            
+                            m_daily_trend.append({
+                                'date': d_str,
+                                'tickets': d_tickets,
+                                'summa': d_summa,
+                                'online_tickets': on_t,
+                                'online_summa': on_s,
+                                'terminal_tickets': term_t,
+                                'terminal_summa': term_s
+                            })
+                            
+                        existing_tix = monthly_data.get(ym, {}).get('total_tickets', 0)
+                        if ym not in monthly_data or m_total_tickets >= existing_tix:
+                            monthly_data[ym] = {
+                                'total_tickets': m_total_tickets,
+                                'total_summa': m_total_summa,
+                                'stations': m_by_summa,
+                                'daily_trend': m_daily_trend
+                            }
+            except Exception as ex:
+                print("data_path parse warning:", ex)
 
     # Build available_months sorted descending
     all_ym_codes = sorted(list(monthly_data.keys()), reverse=True)
@@ -576,7 +615,7 @@ def get_stats():
     report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
     data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
     try:
-        stats = process_excel(data_path, report_path)
+        stats = process_excel(data_path, report_path, uploaded_path=save_path)
         STATS_CACHE = stats
         return jsonify({'success': True, 'stats': stats, 'monthly_reports': stats.get('monthly_data', {})})
     except Exception as e:
@@ -641,7 +680,7 @@ def upload_file():
                         rows_count = 1
 
         invalidate_stats_cache()
-        stats = process_excel(data_path, report_path)
+        stats = process_excel(data_path, report_path, uploaded_path=save_path)
         global STATS_CACHE
         STATS_CACHE = stats
         
@@ -675,7 +714,7 @@ def export_station_excel(station_name):
         else:
             report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
             data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
-            stats = process_excel(data_path, report_path)
+            stats = process_excel(data_path, report_path, uploaded_path=save_path)
             m_code_str = '2026-08'
         
         stations = stats.get('stations', [])
@@ -1149,7 +1188,7 @@ def fetch_api_excel():
             with open(data_path, 'wb') as f:
                 f.write(excel_bytes)
 
-            stats = process_excel(data_path, report_path)
+            stats = process_excel(data_path, report_path, uploaded_path=save_path)
             add_upload_log(f"API Sync ({start_date} - {end_date})", len(excel_bytes), "Muvaffaqiyatli")
 
             return jsonify({
@@ -1206,7 +1245,7 @@ def get_director_summary():
     report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
     data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
     try:
-        stats = process_excel(data_path, report_path)
+        stats = process_excel(data_path, report_path, uploaded_path=save_path)
         return jsonify({
             'success': True,
             'director_summary': stats.get('director_summary', {}),
