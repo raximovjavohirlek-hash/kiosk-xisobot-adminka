@@ -315,11 +315,66 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Smooth TV Mode Auto-Scroll Engine
+    let tvScrollTimer = null;
+    let tvDirection = 1;
+    let tvIsPausing = false;
+
+    function startTvAutoScroll() {
+        stopTvAutoScroll();
+        tvDirection = 1;
+        tvIsPausing = false;
+
+        tvScrollTimer = setInterval(() => {
+            if (tvIsPausing) return;
+
+            const scrollPos = window.scrollY;
+            const windowHeight = window.innerHeight;
+            const fullHeight = document.documentElement.scrollHeight;
+
+            if (tvDirection === 1) {
+                if (scrollPos + windowHeight >= fullHeight - 15) {
+                    tvIsPausing = true;
+                    setTimeout(() => {
+                        tvDirection = -1;
+                        tvIsPausing = false;
+                    }, 2500);
+                } else {
+                    window.scrollBy({ top: 1.5, behavior: 'instant' });
+                }
+            } else {
+                if (scrollPos <= 15) {
+                    tvIsPausing = true;
+                    setTimeout(() => {
+                        tvDirection = 1;
+                        tvIsPausing = false;
+                    }, 2500);
+                } else {
+                    window.scrollBy({ top: -1.5, behavior: 'instant' });
+                }
+            }
+        }, 25);
+    }
+
+    function stopTvAutoScroll() {
+        if (tvScrollTimer) {
+            clearInterval(tvScrollTimer);
+            tvScrollTimer = null;
+        }
+    }
+
     if (tvModeBtn) {
         tvModeBtn.addEventListener('click', () => {
             document.body.classList.toggle('tv-mode');
             const isTv = document.body.classList.contains('tv-mode');
             tvModeBtn.innerHTML = isTv ? '<i class="fa-solid fa-compress"></i> Oddiy Rejim' : '<i class="fa-solid fa-tv"></i> TV Rejim';
+            if (isTv) {
+                startTvAutoScroll();
+                showToast('info', 'TV Rejim Yoqildi', "Ma'lumotlar yuqoridan pastga va pastdan yuqoriga sekin avto-skroll qilmoqda.");
+            } else {
+                stopTvAutoScroll();
+                showToast('info', 'Oddiy Rejim', "Avto-skroll to'xtatildi.");
+            }
         });
     }
 
@@ -575,10 +630,175 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Load Initial Data
-    fetchStats();
-    fetchMappings();
-    fetchUploadLogs();
+
+    // Authentication & System Login Gate
+    const systemLoginGateModal = document.getElementById('systemLoginGateModal');
+    const systemLoginForm = document.getElementById('systemLoginForm');
+    const systemUsernameInput = document.getElementById('systemUsernameInput');
+    const systemPasswordInput = document.getElementById('systemPasswordInput');
+    const systemLoginError = document.getElementById('systemLoginError');
+    const logoutBtn = document.getElementById('logoutBtn');
+
+    function checkAuthentication() {
+        const authUser = localStorage.getItem('auth_user');
+        if (authUser) {
+            try {
+                const userObj = JSON.parse(authUser);
+                if (systemLoginGateModal) systemLoginGateModal.style.display = 'none';
+                if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+                fetchStats();
+                fetchMappings();
+                fetchUploadLogs();
+                fetchUsers();
+                return true;
+            } catch (e) {
+                localStorage.removeItem('auth_user');
+            }
+        }
+        if (systemLoginGateModal) systemLoginGateModal.style.display = 'flex';
+        if (logoutBtn) logoutBtn.style.display = 'none';
+        return false;
+    }
+
+    if (systemLoginForm) {
+        systemLoginForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const username = systemUsernameInput.value.trim();
+            const password = systemPasswordInput.value.trim();
+            if (!username || !password) return;
+
+            if (systemLoginError) systemLoginError.style.display = 'none';
+
+            fetch(getApiUrl('/api/auth/login'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    localStorage.setItem('auth_user', JSON.stringify(data.user));
+                    if (data.token) localStorage.setItem('auth_token', data.token);
+                    if (systemLoginGateModal) systemLoginGateModal.style.display = 'none';
+                    if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+                    showToast('success', 'Xush kelibsiz!', data.message || 'Tizimga muvaffaqiyatli kirdingiz.');
+                    checkAuthentication();
+                } else {
+                    if (systemLoginError) {
+                        systemLoginError.textContent = data.error || "Login yoki parol noto'g'ri!";
+                        systemLoginError.style.display = 'block';
+                    }
+                }
+            })
+            .catch(err => {
+                if (systemLoginError) {
+                    systemLoginError.textContent = 'Serverga ulanishda xatolik: ' + err.message;
+                    systemLoginError.style.display = 'block';
+                }
+            });
+        });
+    }
+
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+            localStorage.removeItem('auth_user');
+            localStorage.removeItem('auth_token');
+            showToast('info', 'Chiqildi', 'Tizimdan chiqdingiz.');
+            setTimeout(() => { window.location.reload(); }, 600);
+        });
+    }
+
+    // User Management Logic
+    const addUserForm = document.getElementById('addUserForm');
+    const newUsernameInput = document.getElementById('newUsernameInput');
+    const newPasswordInput = document.getElementById('newPasswordInput');
+    const newNameInput = document.getElementById('newNameInput');
+    const newRoleSelect = document.getElementById('newRoleSelect');
+    const usersTableBody = document.getElementById('usersTableBody');
+
+    function fetchUsers() {
+        if (!usersTableBody) return;
+        fetch(getApiUrl('/api/users'))
+        .then(res => res.json())
+        .then(data => {
+            if (data.success && data.users) {
+                renderUsersTable(data.users);
+            }
+        })
+        .catch(err => console.error("fetchUsers error:", err));
+    }
+
+    function renderUsersTable(users) {
+        if (!usersTableBody) return;
+        usersTableBody.innerHTML = '';
+        if (users.length === 0) {
+            usersTableBody.innerHTML = '<tr><td colspan="4" class="empty-row">Foydalanuvchilar yo&apos;q</td></tr>';
+            return;
+        }
+        users.forEach(u => {
+            const tr = document.createElement('tr');
+            const isMasterAdmin = u.username.toLowerCase() === 'admin';
+            tr.innerHTML = `
+                <td><strong><i class="fa-solid fa-user" style="color: var(--accent-cyan);"></i> ${u.username}</strong></td>
+                <td>${u.name || u.username}</td>
+                <td><span class="card-badge ${u.role === 'admin' ? 'badge-amber' : ''}">${u.role === 'admin' ? 'Administrator' : 'Foydalanuvchi'}</span></td>
+                <td>
+                    ${isMasterAdmin ? '<span style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-lock"></i> Asosiy</span>' : `<button class="btn btn-sm btn-rose delete-user-btn" data-username="${u.username}"><i class="fa-solid fa-trash"></i></button>`}
+                </td>
+            `;
+            usersTableBody.appendChild(tr);
+        });
+
+        document.querySelectorAll('.delete-user-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const targetUsername = e.currentTarget.getAttribute('data-username');
+                if (confirm(`Haqiqatan ham '${targetUsername}' foydalanuvchisini o'chirmoqchimisiz?`)) {
+                    fetch(getApiUrl('/api/users/' + encodeURIComponent(targetUsername)), { method: 'DELETE' })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            showToast('success', "O'chirildi", data.message);
+                            fetchUsers();
+                        } else {
+                            showToast('error', 'Xatolik', data.error);
+                        }
+                    });
+                }
+            });
+        });
+    }
+
+    if (addUserForm) {
+        addUserForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const username = newUsernameInput.value.trim();
+            const password = newPasswordInput.value.trim();
+            const name = newNameInput.value.trim();
+            const role = newRoleSelect.value;
+
+            if (!username || !password) return;
+
+            fetch(getApiUrl('/api/users'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password, name, role })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('success', "Qo'shildi", data.message);
+                    addUserForm.reset();
+                    fetchUsers();
+                } else {
+                    showToast('error', 'Xatolik', data.error);
+                }
+            })
+            .catch(err => showToast('error', 'Xatolik', err.message));
+        });
+    }
+
+    // Load Initial Data with Auth check
+    checkAuthentication();
 
     // Drag & Drop Handling
     if (dropzone) {

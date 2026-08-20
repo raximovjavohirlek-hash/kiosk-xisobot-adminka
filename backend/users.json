@@ -1,0 +1,9 @@
+[
+  {
+    "username": "admin",
+    "password": "admin",
+    "name": "Bosh Administrator",
+    "role": "admin",
+    "created_at": "2026-08-20 08:00:00"
+  }
+]

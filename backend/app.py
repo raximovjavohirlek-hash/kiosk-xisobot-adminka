@@ -24,6 +24,38 @@ app.config['ADMIN_PASSWORD'] = os.environ.get('ADMIN_PASSWORD', 'admin')
 
 MAPPINGS_FILE = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_mappings.json')
 UPLOAD_LOGS_FILE = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_upload_logs.json')
+USERS_FILE = os.path.join(app.config['UPLOAD_FOLDER'], 'users.json')
+
+def safe_copy_file(src, dst):
+    if not src or not os.path.exists(src):
+        return
+    src_abs = os.path.abspath(src)
+    dst_abs = os.path.abspath(dst)
+    if src_abs == dst_abs:
+        return
+    os.makedirs(os.path.dirname(dst_abs), exist_ok=True)
+    import shutil
+    shutil.copy(src_abs, dst_abs)
+
+def load_users():
+    if os.path.exists(USERS_FILE):
+        try:
+            with open(USERS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    default_pass = app.config.get('ADMIN_PASSWORD', 'admin')
+    return [{
+        "username": "admin",
+        "password": default_pass,
+        "name": "Bosh Administrator",
+        "role": "admin",
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }]
+
+def save_users(users):
+    with open(USERS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(users, f, ensure_ascii=False, indent=2)
 
 DEFAULT_EMAIL_MAP = {
     "toshkent.shimoliykiosk@railway.uz": {"station": "Тошкент Марказий", "col_soni": 30, "col_summa": 31},
@@ -575,11 +607,11 @@ def upload_file():
         report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
         data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
 
-        import zipfile, shutil
+        import zipfile
         if not os.path.exists(report_path) or not zipfile.is_zipfile(report_path):
             ex_backup = os.path.join(app.config['UPLOAD_FOLDER'], 'excellar', 'Август кисока.xlsx')
             if os.path.exists(ex_backup) and zipfile.is_zipfile(ex_backup):
-                shutil.copy(ex_backup, report_path)
+                safe_copy_file(ex_backup, report_path)
 
         fn_lower = filename.lower()
         orig_lower = orig_filename.lower()
@@ -588,20 +620,20 @@ def upload_file():
         if 'кисока' in orig_lower or 'киоска' in orig_lower or 'кисока' in fn_lower or 'киоска' in fn_lower:
             ex_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'excellar')
             os.makedirs(ex_dir, exist_ok=True)
-            shutil.copy(save_path, os.path.join(ex_dir, filename))
-            shutil.copy(save_path, report_path)
+            safe_copy_file(save_path, os.path.join(ex_dir, filename))
+            safe_copy_file(save_path, report_path)
             rows_count = 1
         else:
             try:
                 df = pd.read_excel(save_path)
                 rows_count = len(df)
-                shutil.copy(save_path, data_path)
+                safe_copy_file(save_path, data_path)
                 backend_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'backend')
                 if os.path.exists(backend_dir):
-                    shutil.copy(save_path, os.path.join(backend_dir, 'data.xlsx'))
+                    safe_copy_file(save_path, os.path.join(backend_dir, 'data.xlsx'))
             except Exception as parse_ex:
                 print("Uploaded raw data parse warning:", parse_ex)
-                shutil.copy(save_path, data_path)
+                safe_copy_file(save_path, data_path)
                 if os.path.exists(data_path):
                     try:
                         rows_count = len(pd.read_excel(data_path))
@@ -836,6 +868,92 @@ def admin_login():
     if password == app.config['ADMIN_PASSWORD']:
         return jsonify({'success': True, 'message': 'Admin rejimiga kirdingiz!'})
     return jsonify({'success': False, 'error': "Parol noto'g'ri!"}), 401
+
+@app.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    data = request.json or {}
+    username = str(data.get('username', '')).strip().lower()
+    password = str(data.get('password', '')).strip()
+    
+    users = load_users()
+    for u in users:
+        if str(u.get('username', '')).strip().lower() == username and str(u.get('password', '')).strip() == password:
+            token = base64.b64encode(f"{username}:{time.time()}".encode()).decode()
+            return jsonify({
+                'success': True,
+                'message': 'Muvaffaqiyatli tizimga kirdingiz!',
+                'token': token,
+                'user': {
+                    'username': u.get('username'),
+                    'name': u.get('name', u.get('username')),
+                    'role': u.get('role', 'user')
+                }
+            })
+    
+    if (username == 'admin' or not username) and password == app.config['ADMIN_PASSWORD']:
+        token = base64.b64encode(f"admin:{time.time()}".encode()).decode()
+        return jsonify({
+            'success': True,
+            'message': 'Bosh administrator sifatida kirdingiz!',
+            'token': token,
+            'user': {
+                'username': 'admin',
+                'name': 'Bosh Administrator',
+                'role': 'admin'
+            }
+        })
+        
+    return jsonify({'success': False, 'error': "Login yoki parol noto'g'ri!"}), 401
+
+@app.route('/api/users', methods=['GET', 'POST'])
+def manage_users():
+    if request.method == 'GET':
+        users = load_users()
+        safe_users = [{
+            'username': u.get('username'),
+            'name': u.get('name'),
+            'role': u.get('role', 'user'),
+            'created_at': u.get('created_at', '')
+        } for u in users]
+        return jsonify({'success': True, 'users': safe_users})
+    
+    elif request.method == 'POST':
+        data = request.json or {}
+        username = str(data.get('username', '')).strip().lower()
+        password = str(data.get('password', '')).strip()
+        name = str(data.get('name', '')).strip() or username
+        role = str(data.get('role', 'user')).strip().lower()
+        
+        if not username or not password:
+            return jsonify({'success': False, 'error': "Login va parol kiritilishi shart!"}), 400
+            
+        users = load_users()
+        if any(u.get('username', '').lower() == username for u in users):
+            return jsonify({'success': False, 'error': "Bunday loginli foydalanuvchi allaqachon mavjud!"}), 400
+            
+        users.append({
+            'username': username,
+            'password': password,
+            'name': name,
+            'role': role,
+            'created_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        })
+        save_users(users)
+        return jsonify({'success': True, 'message': f"Foydalanuvchi '{username}' muvaffaqiyatli qo'shildi!"})
+
+@app.route('/api/users/<username>', methods=['DELETE'])
+def delete_user(username):
+    username_clean = str(username).strip().lower()
+    if username_clean == 'admin':
+        return jsonify({'success': False, 'error': "Bosh admin foydalanuvchisini o'chirib bo'lmaydi!"}), 400
+        
+    users = load_users()
+    new_users = [u for u in users if u.get('username', '').lower() != username_clean]
+    if len(new_users) == len(users):
+        return jsonify({'success': False, 'error': "Foydalanuvchi topilmadi!"}), 404
+        
+    save_users(new_users)
+    return jsonify({'success': True, 'message': f"Foydalanuvchi '{username_clean}' o'chirildi!"})
 
 TOKEN_FILE = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_token.json')
 
