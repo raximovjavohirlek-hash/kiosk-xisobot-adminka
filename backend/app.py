@@ -518,6 +518,14 @@ def process_excel(data_path, report_path, uploaded_path=None):
         'year': latest_year
     }
 
+    db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+    try:
+        from database import save_monthly_report_to_db
+        for ym_code, m_stats in monthly_data.items():
+            save_monthly_report_to_db(db_path, ym_code, m_stats)
+    except Exception as db_ex:
+        print("[DB] Save error in process_excel:", db_ex)
+
     return enrich_stats_with_executive_metrics(monthly_data, overall_data_map, ytd_data_map, available_months)
 
 def enrich_stats_with_executive_metrics(monthly_data_map, overall_data_map, ytd_data_map, available_months):
@@ -631,6 +639,17 @@ def get_stats():
     global STATS_CACHE
     if STATS_CACHE is not None:
         return jsonify({'success': True, 'stats': STATS_CACHE, 'monthly_reports': STATS_CACHE.get('monthly_data', {})})
+
+    db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+    email_map = load_mappings()
+    try:
+        from database import get_all_stats_from_db
+        db_stats = get_all_stats_from_db(db_path, email_map)
+        if db_stats:
+            STATS_CACHE = db_stats
+            return jsonify({'success': True, 'stats': db_stats, 'monthly_reports': db_stats.get('monthly_data', {})})
+    except Exception as db_err:
+        print("[DB] Stats query warning:", db_err)
 
     report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
     data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
@@ -1299,11 +1318,21 @@ def start_self_ping():
 
 def warmup_stats_cache():
     try:
-        report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
-        data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
+        db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+        from database import init_db, save_monthly_report_to_db, get_all_stats_from_db
+        init_db(db_path)
+        
+        email_map = load_mappings()
+        db_stats = get_all_stats_from_db(db_path, email_map)
+        if not db_stats:
+            report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
+            data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
+            stats = process_excel(data_path, report_path)
+            db_stats = get_all_stats_from_db(db_path, email_map) or stats
+        
         global STATS_CACHE
-        STATS_CACHE = process_excel(data_path, report_path)
-        print("[Cache] Stats cache pre-warmed successfully!")
+        STATS_CACHE = db_stats
+        print("[DB] SQLite database initialized & pre-warmed successfully!")
     except Exception as e:
         print("[Cache] Pre-warmup warning:", e)
 
