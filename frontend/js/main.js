@@ -1,15 +1,19 @@
 
-function getShortCurrencyLabel(num) {
-    if (!num || isNaN(num) || num === 0) return '';
+function formatMln(num) {
+    if (!num || isNaN(num)) return '0 mln';
     const absNum = Math.abs(num);
     if (absNum >= 1_000_000_000) {
-        return `(${(num / 1_000_000_000).toFixed(2)} mlrd)`;
+        return `${parseFloat((num / 1_000_000_000).toFixed(6))} mlrd`;
     } else if (absNum >= 1_000_000) {
-        return `(${(num / 1_000_000).toFixed(1)} mln)`;
-    } else if (absNum >= 1_000) {
-        return `(${(num / 1_000).toFixed(1)} ming)`;
+        return `${parseFloat((num / 1_000_000).toFixed(6))} mln`;
+    } else {
+        return `${parseFloat((num / 1_000).toFixed(6))} ming`;
     }
-    return '';
+}
+
+function getShortCurrencyLabel(num) {
+    if (!num || isNaN(num) || num === 0) return '';
+    return `(${formatMln(num)})`;
 }
 
 function formatCurrency(num, plain = false) {
@@ -1148,7 +1152,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (currentStats.stations && currentStats.stations.length > 0) {
             const topSt = [...currentStats.stations].sort((a, b) => b.summa_val - a.summa_val)[0];
             if (kpiTopStation) kpiTopStation.textContent = topSt.stansiya;
-            if (kpiTopStationVal) kpiTopStationVal.textContent = `${topSt.soni_val.toLocaleString()} chipta (${(topSt.summa_val / 1000000).toFixed(1)} mln so'm)`;
+            if (kpiTopStationVal) kpiTopStationVal.textContent = `${topSt.soni_val.toLocaleString()} chipta (${formatMln(topSt.summa_val)} so'm)`;
         }
 
         // Payment ratio
@@ -1366,7 +1370,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         padding: 12,
                         callbacks: {
                             label: function(context) {
-                                return ` Tushum: ${context.raw.toLocaleString('uz-UZ')} so'm (${(context.raw / 1000000).toFixed(1)} mln)`;
+                                return ` Tushum: ${context.raw.toLocaleString('uz-UZ')} so'm (${formatMln(context.raw)})`;
                             }
                         }
                     }
@@ -1439,7 +1443,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     tooltip: {
                         callbacks: {
                             label: function(context) {
-                                return ` ${context.label}: ${(context.raw / 1000000).toFixed(1)} mln so'm`;
+                                return ` ${context.label}: ${formatMln(context.raw)} so'm`;
                             }
                         }
                     }
@@ -1548,7 +1552,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div class="st-metric-item">
                         <span class="st-metric-label">Tushum Summasi</span>
-                        <span class="st-metric-value" style="color: var(--accent-emerald);">${(item.summa_val / 1000000).toFixed(1)} mln so'm</span>
+                        <span class="st-metric-value" style="color: var(--accent-emerald);">${formatMln(item.summa_val)} so'm</span>
                     </div>
                 </div>
                 <div class="progress-bar-bg" style="margin-top: 12px;">
