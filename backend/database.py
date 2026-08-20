@@ -2,6 +2,7 @@ import sqlite3
 import os
 import json
 import re
+import hashlib
 
 def get_db_connection(db_path):
     conn = sqlite3.connect(db_path)
@@ -65,8 +66,169 @@ def init_db(db_path):
         )
     ''')
 
+    # 5. Idempotent Individual Tickets Table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS tickets (
+            ticket_number TEXT PRIMARY KEY,
+            order_id TEXT,
+            date_str TEXT,
+            ym TEXT,
+            user_email TEXT,
+            station_name TEXT,
+            payment_type TEXT DEFAULT 'Terminal',
+            qty INTEGER DEFAULT 1,
+            summa REAL DEFAULT 0,
+            status TEXT DEFAULT 'ACTIVE',
+            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_tickets_ym ON tickets(ym)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_tickets_date ON tickets(date_str)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_tickets_user ON tickets(user_email)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_tickets_station ON tickets(station_name)')
+
     conn.commit()
     conn.close()
+
+def batch_upsert_tickets(db_path, ticket_list, batch_size=1000):
+    """
+    Inserts ticket dictionaries into SQLite using batch transactions and INSERT OR IGNORE.
+    Returns dict: {'total_read': int, 'inserted': int, 'skipped': int}
+    """
+    if not ticket_list:
+        return {'total_read': 0, 'inserted': 0, 'skipped': 0}
+
+    init_db(db_path)
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+
+    total_read = len(ticket_list)
+    inserted_count = 0
+    skipped_count = 0
+
+    try:
+        sql = '''
+            INSERT OR IGNORE INTO tickets (
+                ticket_number, order_id, date_str, ym, user_email,
+                station_name, payment_type, qty, summa, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        '''
+
+        cursor.execute("SELECT COUNT(*) FROM tickets")
+        count_before = cursor.fetchone()[0]
+
+        params_batch = []
+        for idx, t in enumerate(ticket_list):
+            t_num = str(t.get('ticket_number') or '').strip()
+            if not t_num:
+                raw_str = f"{t.get('date_str')}_{t.get('user_email')}_{t.get('station_name')}_{t.get('qty')}_{t.get('summa')}_{t.get('payment_type')}_{idx}"
+                t_num = "TICK_" + hashlib.sha256(raw_str.encode()).hexdigest()[:16].upper()
+
+            order_id = str(t.get('order_id') or t_num)
+            date_str = str(t.get('date_str') or '')
+            ym = str(t.get('ym') or '')
+            if not ym and len(date_str) >= 10:
+                parts = date_str.split('.')
+                if len(parts) == 3:
+                    ym = f"{parts[2]}-{parts[1]}"
+            
+            user_email = str(t.get('user_email') or '')
+            station_name = str(t.get('station_name') or '')
+            payment_type = str(t.get('payment_type') or 'Terminal')
+            qty = int(t.get('qty') or 1)
+            summa = float(t.get('summa') or 0)
+            status = str(t.get('status') or 'ACTIVE')
+
+            params_batch.append((
+                t_num, order_id, date_str, ym, user_email,
+                station_name, payment_type, qty, summa, status
+            ))
+
+            if len(params_batch) >= batch_size:
+                cursor.executemany(sql, params_batch)
+                params_batch = []
+
+        if params_batch:
+            cursor.executemany(sql, params_batch)
+
+        conn.commit()
+
+        cursor.execute("SELECT COUNT(*) FROM tickets")
+        count_after = cursor.fetchone()[0]
+
+        inserted_count = count_after - count_before
+        skipped_count = total_read - inserted_count
+
+    except Exception as ex:
+        print("batch_upsert_tickets error:", ex)
+        conn.rollback()
+    finally:
+        conn.close()
+
+    return {
+        'total_read': total_read,
+        'inserted': inserted_count,
+        'skipped': skipped_count
+    }
+
+def get_paginated_tickets_from_db(db_path, page=1, per_page=20, search='', station='', ym=''):
+    init_db(db_path)
+    if not os.path.exists(db_path):
+        return {'tickets': [], 'total_count': 0, 'page': page, 'per_page': per_page, 'total_pages': 0}
+
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+
+    try:
+        query_conditions = ["1=1"]
+        params = []
+
+        if search:
+            query_conditions.append("(ticket_number LIKE ? OR order_id LIKE ? OR station_name LIKE ? OR user_email LIKE ?)")
+            s_param = f"%{search}%"
+            params.extend([s_param, s_param, s_param, s_param])
+
+        if station:
+            query_conditions.append("station_name = ?")
+            params.append(station)
+
+        if ym:
+            query_conditions.append("ym = ?")
+            params.append(ym)
+
+        where_clause = " WHERE " + " AND ".join(query_conditions)
+
+        cursor.execute(f"SELECT COUNT(*) FROM tickets {where_clause}", params)
+        total_count = cursor.fetchone()[0]
+
+        total_pages = (total_count + per_page - 1) // per_page if total_count > 0 else 0
+        offset = (page - 1) * per_page
+
+        cursor.execute(f'''
+            SELECT ticket_number, order_id, date_str, ym, user_email, station_name,
+                   payment_type, qty, summa, status, uploaded_at
+            FROM tickets
+            {where_clause}
+            ORDER BY date_str DESC, ticket_number DESC
+            LIMIT ? OFFSET ?
+        ''', params + [per_page, offset])
+
+        tickets = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+
+        return {
+            'tickets': tickets,
+            'total_count': total_count,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': total_pages
+        }
+
+    except Exception as ex:
+        print("get_paginated_tickets_from_db error:", ex)
+        conn.close()
+        return {'tickets': [], 'total_count': 0, 'page': page, 'per_page': per_page, 'total_pages': 0}
 
 def save_monthly_report_to_db(db_path, ym, stats):
     if not ym or not stats:
@@ -160,7 +322,6 @@ def get_all_stats_from_db(db_path, email_map):
     cursor = conn.cursor()
 
     try:
-        # Check if monthly_summaries exists and has data
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='monthly_summaries'")
         if not cursor.fetchone():
             conn.close()
@@ -187,7 +348,6 @@ def get_all_stats_from_db(db_path, email_map):
             m_name = f"{MONTH_NAMES.get(m, m)} {y}"
             available_months.append({'code': ym, 'name': m_name})
 
-            # Fetch stations for this ym
             cursor.execute('''
                 SELECT station_name, email, tickets, summa, share_percent 
                 FROM station_monthly_stats 
@@ -198,7 +358,6 @@ def get_all_stats_from_db(db_path, email_map):
             
             stations = []
             for sr in st_rows:
-                # Fetch daily breakdown for station
                 cursor.execute('''
                     SELECT date_str as date, tickets, summa 
                     FROM station_daily_breakdown 
@@ -216,7 +375,6 @@ def get_all_stats_from_db(db_path, email_map):
                     'daily_breakdown': db_rows
                 })
 
-            # Fetch daily trend for this ym
             cursor.execute('''
                 SELECT date_str as date, total_tickets as tickets, total_summa as summa,
                        online_tickets, online_summa, terminal_tickets, terminal_summa
@@ -235,11 +393,9 @@ def get_all_stats_from_db(db_path, email_map):
 
         conn.close()
 
-        # Build overall and YTD data
         latest_ym = available_months[0]['code'] if available_months else '2026-08'
         latest_stats = monthly_data.get(latest_ym, {})
 
-        # Compute YTD and overall
         ytd_tix = sum(monthly_data[m]['total_tickets'] for m in monthly_data if m.startswith('2026'))
         ytd_sum = sum(monthly_data[m]['total_summa'] for m in monthly_data if m.startswith('2026'))
         
