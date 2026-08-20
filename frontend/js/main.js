@@ -1,3 +1,25 @@
+
+function getShortCurrencyLabel(num) {
+    if (!num || isNaN(num) || num === 0) return '';
+    const absNum = Math.abs(num);
+    if (absNum >= 1_000_000_000) {
+        return `(${(num / 1_000_000_000).toFixed(2)} mlrd)`;
+    } else if (absNum >= 1_000_000) {
+        return `(${(num / 1_000_000).toFixed(1)} mln)`;
+    } else if (absNum >= 1_000) {
+        return `(${(num / 1_000).toFixed(1)} ming)`;
+    }
+    return '';
+}
+
+function formatCurrency(num, plain = false) {
+    if (num === undefined || num === null || isNaN(num)) return "0 so'm";
+    const formatted = Math.round(num).toLocaleString('uz-UZ') + " so'm";
+    if (plain) return formatted;
+    const shortLabel = getShortCurrencyLabel(num);
+    return shortLabel ? `${formatted} ${shortLabel}` : formatted;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     let revenueChartInstance = null;
     let trendChartInstance = null;
@@ -238,7 +260,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Mini KPIs
         const avgCheck = st.soni_val > 0 ? Math.round(st.summa_val / st.soni_val) : 0;
-        if (modalStSumma) modalStSumma.textContent = `${st.summa_val.toLocaleString('uz-UZ')} so'm`;
+        if (modalStSumma) modalStSumma.textContent = formatCurrency(st.summa_val);
         if (modalStShare) modalStShare.textContent = `${st.share_percent}% umumiy ulush`;
         if (modalStTickets) modalStTickets.textContent = `${st.soni_val.toLocaleString('uz-UZ')} ta`;
         
@@ -1097,7 +1119,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // KPI values
         if (kpiTickets) kpiTickets.textContent = currentStats.total_tickets.toLocaleString('uz-UZ') + ' ta';
-        if (kpiSumma) kpiSumma.textContent = currentStats.total_summa.toLocaleString('uz-UZ') + ' so\'m';
+        if (kpiSumma) kpiSumma.textContent = formatCurrency(currentStats.total_summa);
         
         if (currentStats.stations && currentStats.stations.length > 0) {
             const topSt = [...currentStats.stations].sort((a, b) => b.summa_val - a.summa_val)[0];
@@ -1135,7 +1157,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const stations = stats.stations || [];
 
         // Real Executive KPIs
-        if (dirKpiNetRevenue) dirKpiNetRevenue.textContent = `${(summary.net_revenue || stats.total_summa || 0).toLocaleString('uz-UZ')} so'm`;
+        if (dirKpiNetRevenue) dirKpiNetRevenue.textContent = formatCurrency(summary.net_revenue || stats.total_summa || 0);
         if (dirKpiTotalTickets) dirKpiTotalTickets.textContent = `${(summary.total_tickets || stats.total_tickets || 0).toLocaleString('uz-UZ')} ta`;
 
         // Card 3: Eng Yuqori Savdoli Kassa
@@ -1147,7 +1169,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (dirKpiTopStationSum) {
             const sumVal = topSt ? topSt.summa_val : (summary.top_station_summa || 0);
-            dirKpiTopStationSum.textContent = `${sumVal.toLocaleString('uz-UZ')} so'm`;
+            dirKpiTopStationSum.textContent = formatCurrency(sumVal);
         }
 
         // Card 4: To'lov Turlari Nisbati (Online / Terminal)
@@ -1550,7 +1572,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const revDiff = targetData.total_summa - baseData.total_summa;
         const revPct = baseData.total_summa > 0 ? ((revDiff / baseData.total_summa) * 100).toFixed(1) : 0;
 
-        if (momRevGrowth) momRevGrowth.textContent = `${revDiff >= 0 ? '+' : ''}${revDiff.toLocaleString('uz-UZ')} so'm`;
+        if (momRevGrowth) momRevGrowth.textContent = `${revDiff >= 0 ? '+' : ''}${formatCurrency(revDiff)}`;
         if (momRevBadge) {
             momRevBadge.className = revDiff >= 0 ? 'kpi-badge positive' : 'kpi-badge negative';
             momRevBadge.innerHTML = `<i class="fa-solid fa-arrow-trend-${revDiff >= 0 ? 'up' : 'down'}"></i> ${revPct}%`;
