@@ -615,7 +615,7 @@ def get_stats():
     report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
     data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
     try:
-        stats = process_excel(data_path, report_path, uploaded_path=save_path)
+        stats = process_excel(data_path, report_path)
         STATS_CACHE = stats
         return jsonify({'success': True, 'stats': stats, 'monthly_reports': stats.get('monthly_data', {})})
     except Exception as e:
@@ -714,7 +714,7 @@ def export_station_excel(station_name):
         else:
             report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
             data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
-            stats = process_excel(data_path, report_path, uploaded_path=save_path)
+            stats = process_excel(data_path, report_path)
             m_code_str = '2026-08'
         
         stations = stats.get('stations', [])
@@ -1188,7 +1188,7 @@ def fetch_api_excel():
             with open(data_path, 'wb') as f:
                 f.write(excel_bytes)
 
-            stats = process_excel(data_path, report_path, uploaded_path=save_path)
+            stats = process_excel(data_path, report_path)
             add_upload_log(f"API Sync ({start_date} - {end_date})", len(excel_bytes), "Muvaffaqiyatli")
 
             return jsonify({
@@ -1245,7 +1245,7 @@ def get_director_summary():
     report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
     data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
     try:
-        stats = process_excel(data_path, report_path, uploaded_path=save_path)
+        stats = process_excel(data_path, report_path)
         return jsonify({
             'success': True,
             'director_summary': stats.get('director_summary', {}),
