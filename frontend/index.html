@@ -599,7 +599,12 @@
                                 </div>
                                 <div>
                                     <label style="font-size: 12.5px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Parol:</label>
-                                    <input type="password" id="newPasswordInput" class="input-control" placeholder="Parol kiriting..." required autocomplete="off">
+                                    <div class="password-input-wrapper" style="position: relative; display: flex; align-items: center;">
+                                        <input type="password" id="newPasswordInput" class="input-control" placeholder="Parol kiriting..." required autocomplete="off" style="padding-right: 40px; width: 100%;">
+                                        <button type="button" class="toggle-password-btn" title="Parolni ko'rsatish/yashirish" style="position: absolute; right: 10px; background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 6px; font-size: 15px; display: flex; align-items: center; justify-content: center;">
+                                            <i class="fa-solid fa-eye"></i>
+                                        </button>
+                                    </div>
                                 </div>
                                 <div>
                                     <label style="font-size: 12.5px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Ism va Familiya:</label>
@@ -782,7 +787,12 @@
                 </p>
                 <div class="input-group">
                     <label for="adminPasswordInput">Admin Paroli:</label>
-                    <input type="password" id="adminPasswordInput" class="input-control" placeholder="Parolni kiriting (Standart: admin)..." autocomplete="off">
+                    <div class="password-input-wrapper" style="position: relative; display: flex; align-items: center;">
+                        <input type="password" id="adminPasswordInput" class="input-control" placeholder="Parolni kiriting (Standart: admin)..." autocomplete="off" style="padding-right: 40px; width: 100%;">
+                        <button type="button" class="toggle-password-btn" title="Parolni ko'rsatish/yashirish" style="position: absolute; right: 10px; background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 6px; font-size: 15px; display: flex; align-items: center; justify-content: center;">
+                            <i class="fa-solid fa-eye"></i>
+                        </button>
+                    </div>
                     <div id="adminLoginError" style="color: var(--accent-rose); font-size: 13px; margin-top: 6px; display: none;"></div>
                 </div>
             </div>
@@ -950,7 +960,12 @@
                     <label for="systemPasswordInput" style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;">
                         <i class="fa-solid fa-key" style="color: var(--accent-amber);"></i> Parol:
                     </label>
-                    <input type="password" id="systemPasswordInput" class="input-control" placeholder="Parolni kiriting..." required autocomplete="current-password">
+                    <div class="password-input-wrapper" style="position: relative; display: flex; align-items: center;">
+                        <input type="password" id="systemPasswordInput" class="input-control" placeholder="Parolni kiriting..." required autocomplete="current-password" style="padding-right: 40px; width: 100%;">
+                        <button type="button" class="toggle-password-btn" title="Parolni ko'rsatish/yashirish" style="position: absolute; right: 10px; background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 6px; font-size: 15px; display: flex; align-items: center; justify-content: center;">
+                            <i class="fa-solid fa-eye"></i>
+                        </button>
+                    </div>
                 </div>
                 <div id="systemLoginError" style="color: var(--accent-rose); font-size: 13px; margin-top: 2px; display: none; background: rgba(244, 63, 94, 0.1); border: 1px solid rgba(244, 63, 94, 0.3); padding: 8px 12px; border-radius: var(--radius-sm);"></div>
                 <button type="submit" class="btn btn-primary" id="systemLoginSubmitBtn" style="height: 44px; justify-content: center; font-size: 15px; font-weight: 700; margin-top: 8px;">

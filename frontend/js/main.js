@@ -819,6 +819,30 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Password Visibility Toggle Logic
+    document.addEventListener('click', (e) => {
+        const toggleBtn = e.target.closest('.toggle-password-btn');
+        if (!toggleBtn) return;
+        const wrapper = toggleBtn.closest('.password-input-wrapper') || toggleBtn.parentElement;
+        if (!wrapper) return;
+        const input = wrapper.querySelector('input');
+        if (!input) return;
+        const icon = toggleBtn.querySelector('i');
+        if (input.type === 'password') {
+            input.type = 'text';
+            if (icon) {
+                icon.className = 'fa-solid fa-eye-slash';
+                icon.style.color = 'var(--accent-cyan)';
+            }
+        } else {
+            input.type = 'password';
+            if (icon) {
+                icon.className = 'fa-solid fa-eye';
+                icon.style.color = '';
+            }
+        }
+    });
+
     // Load Initial Data with Auth check
     checkAuthentication();
 
