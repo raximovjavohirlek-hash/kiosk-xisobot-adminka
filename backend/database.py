@@ -585,3 +585,50 @@ def get_paginated_tickets_from_db(db_path, page=1, per_page=20, search='', stati
         print("get_paginated_tickets_from_db error:", ex)
         conn.close()
         return {'tickets': [], 'total_count': 0, 'page': page, 'per_page': per_page, 'total_pages': 0}
+
+def sync_json_tickets_to_db(db_path, ticket_list, email_map=None):
+    """
+    Inserts a list of JSON ticket objects into SQLite database idempotently.
+    Updates monthly, station, and daily aggregate tables automatically.
+    Returns dict: {'status': 'success', 'added': int, 'duplicates_skipped': int, 'total': int}
+    """
+    if not ticket_list:
+        return {'status': 'success', 'added': 0, 'duplicates_skipped': 0, 'total': 0}
+
+    init_db(db_path)
+    res = batch_upsert_tickets(db_path, ticket_list)
+    
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("SELECT DISTINCT ym FROM tickets WHERE ym IS NOT NULL AND ym != ''")
+        ym_rows = cursor.fetchall()
+        for yr in ym_rows:
+            ym = yr['ym']
+            cursor.execute("SELECT SUM(qty), SUM(summa) FROM tickets WHERE ym = ?", (ym,))
+            r_tot = cursor.fetchone()
+            tot_tix = r_tot[0] or 0
+            tot_sum = r_tot[1] or 0.0
+
+            cursor.execute('''
+                INSERT INTO monthly_summaries (ym, total_tickets, total_summa, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(ym) DO UPDATE SET
+                    total_tickets = excluded.total_tickets,
+                    total_summa = excluded.total_summa,
+                    updated_at = CURRENT_TIMESTAMP
+            ''', (ym, tot_tix, tot_sum))
+
+        conn.commit()
+    except Exception as ex:
+        print("sync_json_tickets_to_db aggregate warning:", ex)
+    finally:
+        conn.close()
+
+    return {
+        'status': 'success',
+        'added': res['inserted'],
+        'duplicates_skipped': res['skipped'],
+        'total': res['total_read']
+    }

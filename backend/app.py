@@ -745,6 +745,40 @@ def upload_file():
         add_upload_log(fn, 0, f"Xatolik: {str(e)}")
         return jsonify({'status': 'error', 'message': f"Fayl yuklashda server xatoligi yuz berdi: {str(e)}"}), 500
 
+@app.route('/api/sync-tickets', methods=['POST'])
+def sync_tickets():
+    try:
+        data = request.get_json()
+        if not data or 'tickets' not in data:
+            return jsonify({'status': 'error', 'message': "Chiptalar ma'lumotlari (tickets array) topilmadi"}), 400
+
+        ticket_list = data['tickets']
+        if not isinstance(ticket_list, list):
+            return jsonify({'status': 'error', 'message': "Chiptalar formati massiv (array) bo'lishi shart"}), 400
+
+        db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+        email_map = load_mappings()
+
+        from database import sync_json_tickets_to_db
+        res = sync_json_tickets_to_db(db_path, ticket_list, email_map)
+
+        invalidate_stats_cache()
+        report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
+        data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
+        global STATS_CACHE
+        STATS_CACHE = process_excel(data_path, report_path)
+
+        return jsonify({
+            'status': 'success',
+            'added': res['added'],
+            'duplicates_skipped': res['duplicates_skipped'],
+            'total': res['total'],
+            'message': f"JSON ma'lumotlari muvaffaqiyatli saqlandi! ({res['added']} ta yangi, {res['duplicates_skipped']} ta dublikat o'tkazib yuborildi)"
+        })
+    except Exception as e:
+        print("sync_tickets error:", e)
+        return jsonify({'status': 'error', 'message': f"JSON sync xatoligi: {str(e)}"}), 500
+
 @app.route('/api/tickets', methods=['GET'])
 def get_tickets():
     db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
