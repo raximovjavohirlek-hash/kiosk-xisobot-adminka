@@ -22,6 +22,7 @@ import webbrowser
 import threading
 import io
 import base64
+from functools import wraps
 import requests
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -30,13 +31,55 @@ from datetime import datetime, date
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
+from werkzeug.security import generate_password_hash, check_password_hash
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 app = Flask(__name__)
-CORS(app)  # Enable Cross-Origin Resource Sharing for Cloudflare Pages frontend
-app.config['SECRET_KEY'] = 'kiosk-xisobot-secret-key-2026'
+
+ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
+    'ALLOWED_ORIGINS',
+    'http://localhost:5050,http://127.0.0.1:5050,https://kiosk-xisobot-adminka.pages.dev'
+).split(',') if o.strip()]
+CORS(app, origins=ALLOWED_ORIGINS, supports_credentials=True)
+
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or os.urandom(32).hex()
 app.config['UPLOAD_FOLDER'] = os.path.dirname(os.path.abspath(__file__))
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB limit
 app.config['ADMIN_PASSWORD'] = os.environ.get('ADMIN_PASSWORD', 'admin')
+
+TOKEN_SERIALIZER = URLSafeTimedSerializer(app.config['SECRET_KEY'], salt='kiosk-auth-token')
+TOKEN_MAX_AGE_SECONDS = 8 * 60 * 60  # 8 hours
+
+def issue_token(username, role):
+    return TOKEN_SERIALIZER.dumps({'username': username, 'role': role})
+
+def verify_token(token):
+    try:
+        data = TOKEN_SERIALIZER.loads(token, max_age=TOKEN_MAX_AGE_SECONDS)
+        return data
+    except (BadSignature, SignatureExpired):
+        return None
+
+def get_request_auth():
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.lower().startswith('bearer '):
+        return None
+    token = auth_header[7:].strip()
+    return verify_token(token)
+
+def require_auth(role=None):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            auth = get_request_auth()
+            if not auth:
+                return jsonify({'success': False, 'error': "Avtorizatsiyadan o'tilmagan! Iltimos, qayta tizimga kiring."}), 401
+            if role and auth.get('role') != role:
+                return jsonify({'success': False, 'error': "Ushbu amal uchun ruxsatingiz yo'q!"}), 403
+            request.auth_user = auth
+            return fn(*args, **kwargs)
+        return wrapper
+    return decorator
 
 MAPPINGS_FILE = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_mappings.json')
 UPLOAD_LOGS_FILE = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_upload_logs.json')
@@ -53,21 +96,48 @@ def safe_copy_file(src, dst):
     import shutil
     shutil.copy(src_abs, dst_abs)
 
+def is_hashed_password(pw):
+    return isinstance(pw, str) and pw.startswith(('pbkdf2:', 'scrypt:', 'argon2:'))
+
 def load_users():
+    users = None
     if os.path.exists(USERS_FILE):
         try:
             with open(USERS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                users = json.load(f)
         except Exception:
             pass
-    default_pass = app.config.get('ADMIN_PASSWORD', 'admin')
-    return [{
-        "username": "admin",
-        "password": default_pass,
-        "name": "Bosh Administrator",
-        "role": "admin",
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }]
+
+    if users is None:
+        default_pass = app.config.get('ADMIN_PASSWORD', 'admin')
+        users = [{
+            "username": "admin",
+            "password": generate_password_hash(default_pass, method='pbkdf2:sha256'),
+            "name": "Bosh Administrator",
+            "role": "admin",
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }]
+        save_users(users)
+        return users
+
+    # Migrate any legacy plaintext passwords to hashed form
+    migrated = False
+    for u in users:
+        pw = u.get('password', '')
+        if pw and not is_hashed_password(pw):
+            u['password'] = generate_password_hash(pw, method='pbkdf2:sha256')
+            migrated = True
+    if migrated:
+        save_users(users)
+
+    return users
+
+def verify_user_password(stored_password, candidate):
+    if not stored_password:
+        return False
+    if is_hashed_password(stored_password):
+        return check_password_hash(stored_password, candidate)
+    return stored_password == candidate
 
 def save_users(users):
     with open(USERS_FILE, 'w', encoding='utf-8') as f:
@@ -658,6 +728,7 @@ def safe_filename(filename):
     return clean_name or "uploaded_file.xlsx"
 
 @app.route('/api/upload', methods=['POST'])
+@require_auth(role='admin')
 def upload_file():
     try:
         if 'file' not in request.files:
@@ -737,6 +808,7 @@ def upload_file():
         return jsonify({'status': 'error', 'message': f"Fayl yuklashda server xatoligi yuz berdi: {str(e)}"}), 500
 
 @app.route('/api/sync-tickets', methods=['POST'])
+@require_auth(role='admin')
 def sync_tickets():
     try:
         data = request.get_json()
@@ -983,6 +1055,9 @@ def export_station_excel(station_name):
 @app.route('/api/mappings', methods=['GET', 'POST'])
 def handle_mappings():
     if request.method == 'POST':
+        auth = get_request_auth()
+        if not auth or auth.get('role') != 'admin':
+            return jsonify({'success': False, 'error': "Ushbu amal uchun ruxsatingiz yo'q!"}), 403
         new_map = request.json
         save_mappings(new_map)
         invalidate_stats_cache()
@@ -998,7 +1073,11 @@ def admin_login():
     data = request.json or {}
     password = data.get('password', '')
     if password == app.config['ADMIN_PASSWORD']:
-        return jsonify({'success': True, 'message': 'Admin rejimiga kirdingiz!'})
+        return jsonify({
+            'success': True,
+            'message': 'Admin rejimiga kirdingiz!',
+            'token': issue_token('admin', 'admin')
+        })
     return jsonify({'success': False, 'error': "Parol noto'g'ri!"}), 401
 
 @app.route('/api/auth/login', methods=['POST'])
@@ -1006,11 +1085,12 @@ def auth_login():
     data = request.json or {}
     username = str(data.get('username', '')).strip().lower()
     password = str(data.get('password', '')).strip()
-    
+
     users = load_users()
     for u in users:
-        if str(u.get('username', '')).strip().lower() == username and str(u.get('password', '')).strip() == password:
-            token = base64.b64encode(f"{username}:{time.time()}".encode()).decode()
+        if str(u.get('username', '')).strip().lower() == username and verify_user_password(u.get('password', ''), password):
+            role = u.get('role', 'user')
+            token = issue_token(u.get('username'), role)
             return jsonify({
                 'success': True,
                 'message': 'Muvaffaqiyatli tizimga kirdingiz!',
@@ -1018,12 +1098,12 @@ def auth_login():
                 'user': {
                     'username': u.get('username'),
                     'name': u.get('name', u.get('username')),
-                    'role': u.get('role', 'user')
+                    'role': role
                 }
             })
-    
+
     if (username == 'admin' or not username) and password == app.config['ADMIN_PASSWORD']:
-        token = base64.b64encode(f"admin:{time.time()}".encode()).decode()
+        token = issue_token('admin', 'admin')
         return jsonify({
             'success': True,
             'message': 'Bosh administrator sifatida kirdingiz!',
@@ -1034,10 +1114,11 @@ def auth_login():
                 'role': 'admin'
             }
         })
-        
+
     return jsonify({'success': False, 'error': "Login yoki parol noto'g'ri!"}), 401
 
 @app.route('/api/users', methods=['GET', 'POST'])
+@require_auth(role='admin')
 def manage_users():
     if request.method == 'GET':
         users = load_users()
@@ -1065,7 +1146,7 @@ def manage_users():
             
         users.append({
             'username': username,
-            'password': password,
+            'password': generate_password_hash(password, method='pbkdf2:sha256'),
             'name': name,
             'role': role,
             'created_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1074,6 +1155,7 @@ def manage_users():
         return jsonify({'success': True, 'message': f"Foydalanuvchi '{username}' muvaffaqiyatli qo'shildi!"})
 
 @app.route('/api/users/<username>', methods=['DELETE'])
+@require_auth(role='admin')
 def delete_user(username):
     username_clean = str(username).strip().lower()
     if username_clean == 'admin':
@@ -1096,21 +1178,21 @@ def load_stored_token():
                 data = json.load(f)
                 return {
                     'token': data.get('token', ''),
-                    'csrf_token': data.get('csrf_token', '86de5ba7-734b-4b43-93a9-6ebcd5bfaa40'),
+                    'csrf_token': data.get('csrf_token', ''),
                     'cookie': data.get('cookie', '')
                 }
         except Exception:
             pass
     return {
         'token': '',
-        'csrf_token': '86de5ba7-734b-4b43-93a9-6ebcd5bfaa40',
+        'csrf_token': '',
         'cookie': ''
     }
 
 def save_stored_token(token, csrf_token=None, cookie=None):
     current = load_stored_token()
     new_token = token if token is not None else current.get('token', '')
-    new_csrf = csrf_token if csrf_token is not None else current.get('csrf_token', '86de5ba7-734b-4b43-93a9-6ebcd5bfaa40')
+    new_csrf = csrf_token if csrf_token is not None else current.get('csrf_token', '')
     new_cookie = cookie if cookie is not None else current.get('cookie', '')
     with open(TOKEN_FILE, 'w', encoding='utf-8') as f:
         json.dump({
@@ -1138,6 +1220,7 @@ def check_jwt_health(token, csrf_token=None):
     }
 
 @app.route('/api/admin/token', methods=['GET', 'POST'])
+@require_auth(role='admin')
 def manage_token():
     if request.method == 'POST':
         data = request.json or {}
@@ -1168,6 +1251,7 @@ def manage_token():
         })
 
 @app.route('/api/admin/token-health', methods=['GET'])
+@require_auth(role='admin')
 def get_token_health():
     info = load_stored_token()
     token = info.get('token', '')
@@ -1179,6 +1263,7 @@ def get_token_health():
     })
 
 @app.route('/api/admin/fetch-api-excel', methods=['POST'])
+@require_auth(role='admin')
 def fetch_api_excel():
     data = request.json or {}
     start_date = data.get('startDate', '').strip()
@@ -1189,7 +1274,7 @@ def fetch_api_excel():
     
     info = load_stored_token()
     token = custom_token if custom_token else info.get('token', '')
-    csrf_token = custom_csrf if custom_csrf else info.get('csrf_token', '86de5ba7-734b-4b43-93a9-6ebcd5bfaa40')
+    csrf_token = custom_csrf if custom_csrf else info.get('csrf_token', '')
     cookie_str = custom_cookie if custom_cookie else info.get('cookie', '')
 
     if not token or not token.strip():
@@ -1197,21 +1282,24 @@ def fetch_api_excel():
             'success': False,
             'error': "Bearer Token kiritilmagan! Iltimos, Bearer Tokenni kiriting."
         }), 400
-    
+
     if not start_date or not end_date:
         return jsonify({
             'success': False,
             'error': "Boshlanish va tugash sanasini tanlang!"
         }), 400
 
+    if not cookie_str or not csrf_token:
+        return jsonify({
+            'success': False,
+            'error': "Cookie yoki CSRF token kiritilmagan! Iltimos, barcha maydonlarni to'ldiring."
+        }), 400
+
     clean_token = token.strip()
     if clean_token.lower().startswith('bearer '):
         clean_token = clean_token[7:].strip()
 
-    clean_csrf = csrf_token.strip() if csrf_token else "86de5ba7-734b-4b43-93a9-6ebcd5bfaa40"
-
-    if not cookie_str:
-        cookie_str = f"account-metadata-Token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleHRyYSI6eyJhdXRoTWV0aG9kIjoicGFzc3dvcmQifSwiYWNjb3VudCI6IjhmMzllYTA4LTA1ZDAtNDdhMC04MTc0LWQ3MWRjYzJmZGE3MSJ9.qbudkhZarEQDmBmWkEJFmsSFr4GEtGlaEZZeGHWWCao; account-metadata-Token.sig=Y7tJBOmOnuE-uA8MAH42cMgNM74; XSRF-TOKEN={clean_csrf}"
+    clean_csrf = csrf_token.strip()
 
     api_url = "https://railway-admin.axonlogic.uz/api/v4/query/admin/orders/download/excel"
     

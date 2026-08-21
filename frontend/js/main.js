@@ -24,6 +24,15 @@ function formatCurrency(num, plain = false) {
     return shortLabel ? `${formatted} ${shortLabel}` : formatted;
 }
 
+function getAdminAuthToken() {
+    return sessionStorage.getItem('kiosk-admin-token') || localStorage.getItem('auth_token') || '';
+}
+
+function authHeaders(extra = {}) {
+    const token = getAdminAuthToken();
+    return token ? { ...extra, 'Authorization': `Bearer ${token}` } : extra;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     let revenueChartInstance = null;
     let trendChartInstance = null;
@@ -320,7 +329,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Admin Auth State
-    let isAdminLoggedIn = sessionStorage.getItem('kiosk-admin-auth') === 'true';
+    let isAdminLoggedIn = sessionStorage.getItem('kiosk-admin-auth') === 'true' && !!sessionStorage.getItem('kiosk-admin-token');
     const adminAuthBtn = document.getElementById('adminAuthBtn');
     const adminLoginModal = document.getElementById('adminLoginModal');
     const adminPasswordInput = document.getElementById('adminPasswordInput');
@@ -475,6 +484,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isAdminLoggedIn) {
                 isAdminLoggedIn = false;
                 sessionStorage.removeItem('kiosk-admin-auth');
+                sessionStorage.removeItem('kiosk-admin-token');
                 updateAdminAuthStateUI();
                 showToast('info', 'Admin Rejimi', 'Admin rejimida chiqildi.');
                 const activeTab = document.querySelector('.tab-btn.active');
@@ -511,6 +521,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.success) {
                 isAdminLoggedIn = true;
                 sessionStorage.setItem('kiosk-admin-auth', 'true');
+                if (data.token) sessionStorage.setItem('kiosk-admin-token', data.token);
                 updateAdminAuthStateUI();
                 closeAdminModal();
 
@@ -740,7 +751,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function fetchUsers() {
         if (!usersTableBody) return;
-        fetch(getApiUrl('/api/users'))
+        fetch(getApiUrl('/api/users'), { headers: authHeaders() })
         .then(res => res.json())
         .then(data => {
             if (data.success && data.users) {
@@ -775,7 +786,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.addEventListener('click', (e) => {
                 const targetUsername = e.currentTarget.getAttribute('data-username');
                 if (confirm(`Haqiqatan ham '${targetUsername}' foydalanuvchisini o'chirmoqchimisiz?`)) {
-                    fetch(getApiUrl('/api/users/' + encodeURIComponent(targetUsername)), { method: 'DELETE' })
+                    fetch(getApiUrl('/api/users/' + encodeURIComponent(targetUsername)), { method: 'DELETE', headers: authHeaders() })
                     .then(res => res.json())
                     .then(data => {
                         if (data.success) {
@@ -802,7 +813,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             fetch(getApiUrl('/api/users'), {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ username, password, name, role })
             })
             .then(res => res.json())
@@ -892,6 +903,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         fetch(getApiUrl('/api/upload'), {
             method: 'POST',
+            headers: authHeaders(),
             body: formData
         })
         .then(res => res.json())
@@ -971,7 +983,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         fetch(getApiUrl('/api/mappings'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(newMap)
         })
         .then(res => res.json())
@@ -2004,7 +2016,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function loadTokenData() {
         if (!isAdminLoggedIn) return;
-        fetch(getApiUrl('/api/admin/token'))
+        fetch(getApiUrl('/api/admin/token'), { headers: authHeaders() })
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
@@ -2030,7 +2042,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const icon = checkTokenHealthBtn ? checkTokenHealthBtn.querySelector('i') : null;
         if (icon) icon.classList.add('fa-spin');
 
-        fetch(getApiUrl('/api/admin/token-health'))
+        fetch(getApiUrl('/api/admin/token-health'), { headers: authHeaders() })
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
@@ -2066,7 +2078,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         fetch(getApiUrl('/api/admin/token'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ token: tokenVal, csrf_token: csrfVal })
         })
             .then(res => res.json())
@@ -2105,7 +2117,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         fetch(getApiUrl('/api/admin/fetch-api-excel'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ startDate: startDate, endDate: endDate, token: customToken, csrf_token: customCsrf })
         })
             .then(res => res.json().then(d => ({ status: res.status, body: d })))

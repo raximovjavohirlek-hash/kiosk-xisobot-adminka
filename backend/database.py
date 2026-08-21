@@ -254,12 +254,17 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
                         return orig
             return None
 
-        ticket_col = find_col(['номер билета', 'chipta raqami', 'ticket number', 'ticket_number', 'id заказа', 'order_id'])
+        ticket_col = find_col(['код заказа', 'номер билета', 'chipta raqami', 'ticket number', 'ticket_number', 'id заказа', 'order_id'])
+        ticket_numbers_col = find_col(['номера билетов', 'ticket numbers'])
         date_col = find_col(['дата создания', 'дата', 'date', 'sana', 'created_at', 'кун'])
         user_col = find_col(['пользователь', 'user', 'email', 'pochta', 'kassa'])
         qty_col = find_col(['количество билетов', 'количество', 'soni', 'tickets'])
         sum_col = find_col(['общая стоимость', 'стоимость', 'summa', 'amount', 'total', 'жами'])
         pay_col = find_col(['способ оплаты', 'оплата', 'paymenttype', 'payment_type'])
+
+        # Only ingest rows from whitelisted kiosk emails (email_map keys) — everything
+        # else (regular customer accounts, social logins, etc.) must be skipped entirely.
+        allowed_emails = {str(k).strip().lower() for k in email_map.keys()} if email_map else None
 
         # Validate required columns
         missing_cols = []
@@ -275,7 +280,16 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
             }
 
         ticket_rows = []
+        skipped_not_whitelisted = 0
         for idx, row in df.iterrows():
+            u_val = str(row.get(user_col) if user_col else '').strip()
+
+            # Skip any row whose email isn't one of our known kiosk accounts
+            # (regular customers, social logins, etc. must never enter the dashboard).
+            if allowed_emails is not None and u_val.lower() not in allowed_emails:
+                skipped_not_whitelisted += 1
+                continue
+
             d_val = row.get(date_col) if date_col else None
             if pd.notnull(d_val):
                 if hasattr(d_val, 'strftime'):
@@ -288,9 +302,8 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
             else:
                 d_str = ''
 
-            u_val = str(row.get(user_col) if user_col else '').strip()
             st_name = email_map.get(u_val, {}).get('station', u_val or 'Noma\'lum') if email_map else u_val
-            
+
             try:
                 q_val = int(re.sub(r'[^\d\-]', '', str(row.get(qty_col)))) if qty_col and pd.notnull(row.get(qty_col)) else 1
             except Exception:
@@ -304,6 +317,15 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
             p_val = str(row.get(pay_col) if pay_col else 'Terminal')
             p_type = 'Online' if any(k in p_val.lower() for k in ['online', 'онлайн', 'click', 'payme', 'uzum']) else 'Terminal'
             t_num = str(row.get(ticket_col) if ticket_col and pd.notnull(row.get(ticket_col)) else '').strip()
+
+            if not t_num:
+                # Stable fallback identity built only from the row's own content
+                # (never the positional index), so the same real order always
+                # hashes to the same ticket_number across repeated uploads of
+                # the same export — this is what makes re-uploads idempotent.
+                tn_val = str(row.get(ticket_numbers_col) if ticket_numbers_col and pd.notnull(row.get(ticket_numbers_col)) else '').strip()
+                raw_str = f"{d_str}_{u_val}_{tn_val}_{q_val}_{s_val}_{p_val}"
+                t_num = "TICK_" + hashlib.sha256(raw_str.encode()).hexdigest()[:16].upper()
 
             if d_str or s_val > 0 or q_val > 0:
                 ticket_rows.append({
@@ -319,9 +341,10 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
                 })
 
         metrics = batch_upsert_tickets(db_path, ticket_rows)
+        metrics['skipped_not_whitelisted'] = skipped_not_whitelisted
         return {
             'status': 'success',
-            'message': f"Fayl muvaffaqiyatli ishlandi va ma'lumotlar bazasiga saqlandi! ({metrics['inserted']} ta yangi, {metrics['skipped']} ta dublikat o'tkazib yuborildi)",
+            'message': f"Fayl muvaffaqiyatli ishlandi va ma'lumotlar bazasiga saqlandi! ({metrics['inserted']} ta yangi, {metrics['skipped']} ta dublikat, {skipped_not_whitelisted} ta kiosk bo'lmagan foydalanuvchi o'tkazib yuborildi)",
             'metrics': metrics
         }
 

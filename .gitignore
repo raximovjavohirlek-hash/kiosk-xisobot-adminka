@@ -5,3 +5,11 @@ __pycache__/
 *.log
 .vscode/
 .idea/
+
+# Sensitive / generated data — never commit
+backend/kiosk_token.json
+backend/users.json
+backend/kiosk_data.db
+backend/kiosk_upload_logs.json
+kiosk_upload_logs.json
+*.xlsx

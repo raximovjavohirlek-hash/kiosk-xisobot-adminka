@@ -12,3 +12,7 @@ services:
         value: 3.10.12
       - key: ADMIN_PASSWORD
         generateValue: true
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALLOWED_ORIGINS
+        value: https://kiosk-xisobot-adminka.pages.dev
