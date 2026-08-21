@@ -281,7 +281,10 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
                 if hasattr(d_val, 'strftime'):
                     d_str = d_val.strftime('%d.%m.%Y')
                 else:
-                    d_str = str(d_val).split(' ')[0].strip()
+                    try:
+                        d_str = pd.to_datetime(str(d_val)).strftime('%d.%m.%Y')
+                    except Exception:
+                        d_str = str(d_val).split(' ')[0].split('T')[0].strip()
             else:
                 d_str = ''
 
