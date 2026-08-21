@@ -404,10 +404,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // API Sync Link
-    const apiSyncLink = document.getElementById('apiSyncLink');
-    if (apiSyncLink) apiSyncLink.href = getApiUrl('/api-sync');
-
     // Share Modal
     if (shareUrlBtn) {
         shareUrlBtn.addEventListener('click', () => {
@@ -887,107 +883,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (dropzoneContent) dropzoneContent.style.display = 'none';
         if (uploadSpinner) uploadSpinner.style.display = 'flex';
 
-        // Client-Side Excel Parsing via SheetJS (XLSX)
-        if (typeof XLSX !== 'undefined') {
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                try {
-                    const data = new Uint8Array(e.target.result);
-                    const workbook = XLSX.read(data, { type: 'array', cellDates: true });
-                    const firstSheetName = workbook.SheetNames[0];
-                    const worksheet = workbook.Sheets[firstSheetName];
-                    
-                    const rawJson = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
-                    
-                    if (!rawJson || rawJson.length === 0) {
-                        if (uploadSpinner) uploadSpinner.style.display = 'none';
-                        if (dropzoneContent) dropzoneContent.style.display = 'block';
-                        showToast('error', 'Fayl Bo\'sh', 'Excel faylida hech qanday yozuv topilmadi!');
-                        return;
-                    }
-
-                    const ticketsPayload = [];
-                    rawJson.forEach((row, idx) => {
-                        let tNum = "", dateStr = "", userEmail = "", qty = 1, summa = 0, pType = "Terminal";
-                        
-                        Object.keys(row).forEach(k => {
-                            const kClean = String(k).trim().toLowerCase();
-                            const val = row[k];
-                            
-                            if (kClean.includes('номер билета') || kClean.includes('ticket_number') || kClean.includes('id заказа') || kClean.includes('order_id')) {
-                                tNum = String(val).trim();
-                            }
-                            if (kClean.includes('дата') || kClean.includes('sana') || kClean.includes('date') || kClean.includes('created_at') || kClean.includes('кун')) {
-                                if (val instanceof Date) {
-                                    dateStr = val.toLocaleDateString('ru-RU');
-                                } else {
-                                    dateStr = String(val).split(' ')[0].trim();
-                                }
-                            }
-                            if (kClean.includes('пользователь') || kClean.includes('user') || kClean.includes('email') || kClean.includes('kassa')) {
-                                userEmail = String(val).trim();
-                            }
-                            if (kClean.includes('количество') || kClean.includes('soni') || kClean.includes('qty') || kClean.includes('tickets')) {
-                                const qVal = parseInt(String(val).replace(/[^\d\-]/g, ''), 10);
-                                if (!isNaN(qVal)) qty = qVal;
-                            }
-                            if (kClean.includes('стоимость') || kClean.includes('summa') || kClean.includes('amount') || kClean.includes('total') || kClean.includes('jami')) {
-                                const sVal = parseFloat(String(val).replace(/[^\d\-.]/g, ''));
-                                if (!isNaN(sVal)) summa = sVal;
-                            }
-                            if (kClean.includes('оплата') || kClean.includes('payment')) {
-                                const pStr = String(val).toLowerCase();
-                                if (pStr.includes('online') || pStr.includes('онлайн') || pStr.includes('click') || pStr.includes('payme')) {
-                                    pType = 'Online';
-                                }
-                            }
-                        });
-
-                        if (dateStr || summa > 0 || qty > 0) {
-                            ticketsPayload.push({
-                                ticket_number: tNum,
-                                date_str: dateStr,
-                                user_email: userEmail,
-                                qty: qty > 0 ? qty : 1,
-                                summa: summa,
-                                payment_type: pType
-                            });
-                        }
-                    });
-
-                    fetch(getApiUrl('/api/sync-tickets'), {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ tickets: ticketsPayload, filename: file.name })
-                    })
-                    .then(res => res.json())
-                    .then(resData => {
-                        if (uploadSpinner) uploadSpinner.style.display = 'none';
-                        if (dropzoneContent) dropzoneContent.style.display = 'block';
-
-                        if (resData.status === 'success' || resData.success) {
-                            fetchStats();
-                            fetchUploadLogs();
-                            const addedMsg = `${resData.added || 0} ta yangi chipta kiritildi, ${resData.duplicates_skipped || 0} ta dublikat o'tkazib yuborildi.`;
-                            showToast('success', 'Muvaffaqiyatli Sync', resData.message || addedMsg);
-                        } else {
-                            showToast('error', 'Sync Xatoligi', resData.message || resData.error || 'Noma\'lum xatolik');
-                        }
-                    })
-                    .catch(err => {
-                        console.warn("Client Sync failed, fallbacking to multipart upload...", err);
-                        fallbackFormDataUpload(file);
-                    });
-
-                } catch (parseErr) {
-                    console.error("SheetJS parse error:", parseErr);
-                    fallbackFormDataUpload(file);
-                }
-            };
-            reader.readAsArrayBuffer(file);
-        } else {
-            fallbackFormDataUpload(file);
-        }
+        fallbackFormDataUpload(file);
     }
 
     function fallbackFormDataUpload(file) {

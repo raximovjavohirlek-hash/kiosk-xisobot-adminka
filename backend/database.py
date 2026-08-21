@@ -109,6 +109,7 @@ def batch_upsert_tickets(db_path, ticket_list, batch_size=1000):
     total_read = len(ticket_list)
     inserted_count = 0
     skipped_count = 0
+    rejected_invalid = 0
 
     try:
         sql = '''
@@ -123,6 +124,12 @@ def batch_upsert_tickets(db_path, ticket_list, batch_size=1000):
 
         params_batch = []
         for idx, t in enumerate(ticket_list):
+            date_str_check = str(t.get('date_str') or '').strip()
+            user_email_check = str(t.get('user_email') or '').strip()
+            if not date_str_check and not user_email_check:
+                rejected_invalid += 1
+                continue
+
             t_num = str(t.get('ticket_number') or '').strip()
             if not t_num:
                 raw_str = f"{t.get('date_str')}_{t.get('user_email')}_{t.get('station_name')}_{t.get('qty')}_{t.get('summa')}_{t.get('payment_type')}_{idx}"
@@ -161,19 +168,20 @@ def batch_upsert_tickets(db_path, ticket_list, batch_size=1000):
         count_after = cursor.fetchone()[0]
 
         inserted_count = count_after - count_before
-        skipped_count = total_read - inserted_count
+        skipped_count = total_read - rejected_invalid - inserted_count
 
     except Exception as ex:
         print("batch_upsert_tickets error:", ex)
         conn.rollback()
-        skipped_count = total_read
+        skipped_count = total_read - rejected_invalid
     finally:
         conn.close()
 
     return {
         'total_read': total_read,
         'inserted': inserted_count,
-        'skipped': skipped_count
+        'skipped': skipped_count,
+        'rejected_invalid': rejected_invalid
     }
 
 def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
@@ -204,8 +212,15 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
                 'message': f"Excel faylini o'qib bo'lmadi: {str(read_ex)}"
             }
 
+        if 'Худудлар' in xl.sheet_names:
+            return {
+                'status': 'skipped_report_format',
+                'message': "Bu hisobot formatidagi fayl (Худудлар varag'i bor) — process_excel orqali qayta ishlanadi, tranzaksiya jadvaliga yozilmaydi.",
+                'metrics': {'total_read': 0, 'inserted': 0, 'skipped': 0}
+            }
+
         sheet_name = xl.sheet_names[0]
-        
+
         # Read header scan to locate actual data header row
         df_scan = pd.read_excel(xl, sheet_name=sheet_name, nrows=10, header=None)
         
@@ -253,7 +268,7 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
         if not (user_col or sum_col or qty_col):
             missing_cols.append("Kassa / Tushum (Пользователь / Summa)")
 
-        if missing_cols and 'Худудлар' not in xl.sheet_names:
+        if missing_cols:
             return {
                 'status': 'error',
                 'message': f"Excel faylida kerakli ustunlar topilmadi: {', '.join(missing_cols)}. Iltimos, ustunlar sarlavhasini tekshiring."
@@ -630,5 +645,6 @@ def sync_json_tickets_to_db(db_path, ticket_list, email_map=None):
         'status': 'success',
         'added': res['inserted'],
         'duplicates_skipped': res['skipped'],
-        'total': res['total_read']
+        'total': res['total_read'],
+        'rejected_invalid': res.get('rejected_invalid', 0)
     }

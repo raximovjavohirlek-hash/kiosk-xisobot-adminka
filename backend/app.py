@@ -27,7 +27,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 import pandas as pd
 from datetime import datetime, date
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
@@ -625,15 +625,6 @@ def enrich_stats_with_executive_metrics(monthly_data_map, overall_data_map, ytd_
         'last_updated': datetime.now().strftime('%d.%m.%Y %H:%M')
     }
 
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-@app.route('/api-sync')
-@app.route('/admin/api-sync')
-def api_sync_page():
-    return render_template('api_sync.html')
-
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     global STATS_CACHE
@@ -773,6 +764,7 @@ def sync_tickets():
             'added': res['added'],
             'duplicates_skipped': res['duplicates_skipped'],
             'total': res['total'],
+            'rejected_invalid': res.get('rejected_invalid', 0),
             'message': f"JSON ma'lumotlari muvaffaqiyatli saqlandi! ({res['added']} ta yangi, {res['duplicates_skipped']} ta dublikat o'tkazib yuborildi)"
         })
     except Exception as e:
