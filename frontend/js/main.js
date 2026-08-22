@@ -24,6 +24,20 @@ function formatCurrency(num, plain = false) {
     return shortLabel ? `${formatted} ${shortLabel}` : formatted;
 }
 
+function isCurrentUserAdmin() {
+    const authUserStr = localStorage.getItem('auth_user');
+    if (authUserStr) {
+        try {
+            const u = JSON.parse(authUserStr);
+            if (u && u.role === 'admin') return true;
+        } catch (e) {}
+    }
+    if (sessionStorage.getItem('kiosk-admin-auth') === 'true') {
+        return true;
+    }
+    return false;
+}
+
 function getAdminAuthToken() {
     return sessionStorage.getItem('kiosk-admin-token') || localStorage.getItem('auth_token') || '';
 }
@@ -1463,7 +1477,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     else if (idx === 1) rankBadgeHtml = `<span class="rank-badge rank-2" title="2-O'rin"><i class="fa-solid fa-medal"></i> 2</span>`;
                     else if (idx === 2) rankBadgeHtml = `<span class="rank-badge rank-3" title="3-O'rin"><i class="fa-solid fa-medal"></i> 3</span>`;
 
-                    const isAdmin = getAdminAuthToken();
+                    const isAdmin = isCurrentUserAdmin();
                     const editBtnHtml = isAdmin ? `<button class="btn-icon-only btn-sm" style="margin-left:8px; color:var(--accent-amber); padding:2px 6px; font-size:11px;" title="Sotuvni tahrirlash" onclick="event.stopPropagation(); openQuickEditModal('${st.stansiya}', '${st.email}', '${currentSelectedPeriod}', ${st.soni_val}, ${st.summa_val})"><i class="fa-solid fa-pen"></i></button>` : '';
 
                     tr.innerHTML = `
@@ -1735,7 +1749,7 @@ document.addEventListener('DOMContentLoaded', () => {
             tr.title = `${item.stansiya} kassa ma'lumotlarini ochish uchun bosing`;
             tr.onclick = () => openStationDetailsModal(item.stansiya);
             const pct = totalSumma > 0 ? ((item.summa_val / totalSumma) * 100).toFixed(1) : 0;
-            const isAdmin = getAdminAuthToken();
+            const isAdmin = isCurrentUserAdmin();
             const editBtnHtml = isAdmin ? `<button class="btn-icon-only btn-sm" style="margin-left:8px; color:var(--accent-amber); padding:2px 6px; font-size:11px;" title="Sotuvni tahrirlash" onclick="event.stopPropagation(); openQuickEditModal('${item.stansiya}', '${item.email}', '${currentSelectedPeriod}', ${item.soni_val}, ${item.summa_val})"><i class="fa-solid fa-pen"></i></button>` : '';
 
             tr.innerHTML = `
