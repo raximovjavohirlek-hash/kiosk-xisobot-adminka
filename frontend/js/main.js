@@ -3,11 +3,11 @@ function formatMln(num) {
     if (!num || isNaN(num)) return '0 mln';
     const absNum = Math.abs(num);
     if (absNum >= 1_000_000_000) {
-        return `${parseFloat((num / 1_000_000_000).toFixed(6))} mlrd`;
+        return `${(num / 1_000_000_000).toFixed(2)} mlrd`;
     } else if (absNum >= 1_000_000) {
-        return `${parseFloat((num / 1_000_000).toFixed(6))} mln`;
+        return `${(num / 1_000_000).toFixed(1)} mln`;
     } else {
-        return `${parseFloat((num / 1_000).toFixed(6))} ming`;
+        return `${(num / 1_000).toFixed(1)} ming`;
     }
 }
 
@@ -48,7 +48,6 @@ function authHeaders(extra = {}) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    let revenueChartInstance = null;
     let trendChartInstance = null;
     let comparisonChartInstance = null;
     let directorHorizontalChartInstance = null;
@@ -111,14 +110,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const closeShareModalBtn = document.getElementById('closeShareModalBtn');
     const okShareModalBtn = document.getElementById('okShareModalBtn');
 
-    // Overview KPIs
-    const kpiTickets = document.getElementById('kpiTickets');
-    const kpiSumma = document.getElementById('kpiSumma');
-    const kpiTopStation = document.getElementById('kpiTopStation');
-    const kpiTopStationVal = document.getElementById('kpiTopStationVal');
-    const kpiRatio = document.getElementById('kpiRatio');
-    const kpiRatioSub = document.getElementById('kpiRatioSub');
-
     // Rahbariyat Dashboard Real KPI Elements
     const dirKpiNetRevenue = document.getElementById('dirKpiNetRevenue');
     const dirKpiTotalTickets = document.getElementById('dirKpiTotalTickets');
@@ -132,8 +123,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const directorMatrixTableBody = document.getElementById('directorMatrixTableBody');
 
     // Tables & Controls
-    const tableBody = document.getElementById('tableBody');
-    const tableSearch = document.getElementById('tableSearch');
     const stationCardsGrid = document.getElementById('stationCardsGrid');
     const dailyTableBody = document.getElementById('dailyTableBody');
 
@@ -143,7 +132,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const uploadLogsTableBody = document.getElementById('uploadLogsTableBody');
 
     const sortSegmentButtons = document.querySelectorAll('.sort-btn');
-    const sortableThs = document.querySelectorAll('.sortable-th');
 
     // Comparison Elements
     const compBaseMonth = document.getElementById('compBaseMonth');
@@ -448,12 +436,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         localStorage.setItem('kiosk-theme', theme);
         if (currentStats) {
-            renderRevenueChart(getSortedStations());
+            const sortedStations = getSortedStations();
+            renderDirectorDashboard(currentStats, sortedStations);
             renderTrendChart(currentStats.daily_trend);
             renderComparisonView();
-            if (fullBackendStats) {
-                renderDirectorDashboard(fullBackendStats);
-            }
         }
     }
 
@@ -503,8 +489,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast('info', 'Admin Rejimi', 'Admin rejimida chiqildi.');
                 const activeTab = document.querySelector('.tab-btn.active');
                 if (activeTab && activeTab.getAttribute('data-tab') === 'tab-admin') {
-                    const directorTabBtn = document.querySelector('.tab-btn[data-tab="tab-director"]');
-                    if (directorTabBtn) directorTabBtn.click();
+                    const dashboardTabBtn = document.querySelector('.tab-btn[data-tab="tab-dashboard"]');
+                    if (dashboardTabBtn) dashboardTabBtn.click();
                 }
             } else {
                 openAdminModal();
@@ -595,17 +581,25 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    // Admin Center Sub-Navigation
+    const adminSubnavBtns = document.querySelectorAll('.admin-subnav-btn');
+    const adminSubsections = document.querySelectorAll('.admin-subsection');
+
+    adminSubnavBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetSubtab = btn.getAttribute('data-subtab');
+            adminSubnavBtns.forEach(b => b.classList.remove('active'));
+            adminSubsections.forEach(s => s.classList.remove('active'));
+            btn.classList.add('active');
+            const targetSection = document.getElementById(targetSubtab);
+            if (targetSection) targetSection.classList.add('active');
+        });
+    });
+
     // Business Sort Handlers
     sortSegmentButtons.forEach(btn => {
         btn.addEventListener('click', () => {
             const sortMode = btn.getAttribute('data-sort');
-            setSortMode(sortMode);
-        });
-    });
-
-    sortableThs.forEach(th => {
-        th.addEventListener('click', () => {
-            const sortMode = th.getAttribute('data-sort-key');
             setSortMode(sortMode);
         });
     });
@@ -621,19 +615,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        sortableThs.forEach(th => {
-            if (th.getAttribute('data-sort-key') === mode) {
-                th.classList.add('active');
-            } else {
-                th.classList.remove('active');
-            }
-        });
-
         if (currentStats) {
             const sortedStations = getSortedStations();
-            renderTable(sortedStations, currentStats.total_summa);
+            renderDirectorDashboard(currentStats, sortedStations);
             renderStationCards(sortedStations, currentStats.total_summa);
-            renderRevenueChart(sortedStations);
         }
     }
 
@@ -1366,59 +1351,27 @@ document.addEventListener('DOMContentLoaded', () => {
         const periodBadges = document.querySelectorAll('.active-period-badge-label');
         periodBadges.forEach(el => { el.textContent = periodTitle; });
 
-        renderDirectorDashboard(currentStats);
-        renderActiveViews();
+        const sortedStations = getSortedStations();
+        renderDirectorDashboard(currentStats, sortedStations);
+        renderStationCards(sortedStations, currentStats.total_summa);
+        renderDailyTable(currentStats.daily_trend || []);
+        renderTrendChart(currentStats.daily_trend || []);
         renderComparisonView();
     }
 
-    function renderActiveViews() {
-        if (!currentStats) return;
-
-        // KPI values
-        if (kpiTickets) kpiTickets.textContent = currentStats.total_tickets.toLocaleString('uz-UZ') + ' ta';
-        if (kpiSumma) kpiSumma.textContent = formatCurrency(currentStats.total_summa);
-        
-        if (currentStats.stations && currentStats.stations.length > 0) {
-            const topSt = [...currentStats.stations].sort((a, b) => b.summa_val - a.summa_val)[0];
-            if (kpiTopStation) kpiTopStation.textContent = topSt.stansiya;
-            if (kpiTopStationVal) kpiTopStationVal.textContent = `${topSt.soni_val.toLocaleString()} chipta (${formatMln(topSt.summa_val)} so'm)`;
-        }
-
-        // Payment ratio
-        let onlineSum = 0;
-        let terminalSum = 0;
-        (currentStats.daily_trend || []).forEach(item => {
-            onlineSum += item.online_tickets || 0;
-            terminalSum += item.terminal_tickets || 0;
-        });
-        const grandPayTickets = onlineSum + terminalSum || 1;
-        const onlinePct = ((onlineSum / grandPayTickets) * 100).toFixed(1);
-        const terminalPct = ((terminalSum / grandPayTickets) * 100).toFixed(1);
-
-        if (kpiRatio) kpiRatio.textContent = `${onlinePct}% / ${terminalPct}%`;
-        if (kpiRatioSub) kpiRatioSub.textContent = `Online: ${onlineSum.toLocaleString()} | Terminal: ${terminalSum.toLocaleString()}`;
-
-        // Render Views
-        const sortedStations = getSortedStations();
-        renderTable(sortedStations, currentStats.total_summa);
-        renderStationCards(sortedStations, currentStats.total_summa);
-        renderDailyTable(currentStats.daily_trend || []);
-        renderRevenueChart(sortedStations);
-        renderTrendChart(currentStats.daily_trend || []);
-    }
-
     /* RAHBARIYAT DASHBOARD RENDERER (PURE BUSINESS METRICS) */
-    function renderDirectorDashboard(stats) {
+    function renderDirectorDashboard(stats, sortedStations) {
         if (!stats) return;
         const summary = stats.director_summary || {};
-        const stations = stats.stations || [];
+        const stations = sortedStations || getSortedStations(stats);
 
         // Real Executive KPIs
         if (dirKpiNetRevenue) dirKpiNetRevenue.textContent = formatCurrency(summary.net_revenue || stats.total_summa || 0);
         if (dirKpiTotalTickets) dirKpiTotalTickets.textContent = `${(summary.total_tickets || stats.total_tickets || 0).toLocaleString('uz-UZ')} ta`;
 
-        // Card 3: Eng Yuqori Savdoli Kassa
-        const topSt = (stations && stations.length > 0) ? stations[0] : null;
+        // Card 3: Eng Yuqori Savdoli Kassa (har doim summa bo'yicha, sort rejimidan qat'i nazar)
+        const revenueSorted = [...(stats.stations || [])].sort((a, b) => b.summa_val - a.summa_val);
+        const topSt = revenueSorted.length > 0 ? revenueSorted[0] : null;
         if (dirKpiTopStationName) dirKpiTopStationName.textContent = topSt ? topSt.stansiya : (summary.top_station || '-');
         if (dirKpiTopStationShare) {
             const shPct = topSt ? topSt.share_percent : (summary.top_station_share || 0);
@@ -1562,11 +1515,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const textColor = isLight ? '#475569' : '#94a3b8';
         const gridColor = isLight ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.05)';
 
-        // Sort descending by revenue for horizontal chart
-        const sorted = [...stations].sort((a, b) => b.summa_val - a.summa_val);
-
-        const labels = sorted.map((s, i) => `${i + 1}. ${s.stansiya}`);
-        const data = sorted.map(s => s.summa_val);
+        // stations kelayotganda allaqachon joriy sort rejimi bo'yicha tartiblangan
+        const labels = stations.map((s, i) => `${i + 1}. ${s.stansiya}`);
+        const data = currentSortMode === 'soni' ? stations.map(s => s.soni_val) : stations.map(s => s.summa_val);
+        const labelText = currentSortMode === 'soni' ? 'Sotilgan Chiptalar Soni' : 'Tushum Summasi (So\'m)';
 
         const chartCtx = ctx.getContext('2d');
         const gradient = chartCtx.createLinearGradient(0, 0, 400, 0);
@@ -1578,7 +1530,7 @@ document.addEventListener('DOMContentLoaded', () => {
             data: {
                 labels: labels,
                 datasets: [{
-                    label: 'Tushum Summasi (So\'m)',
+                    label: labelText,
                     data: data,
                     backgroundColor: gradient,
                     borderColor: '#38bdf8',
@@ -1602,6 +1554,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         padding: 12,
                         callbacks: {
                             label: function(context) {
+                                if (currentSortMode === 'soni') {
+                                    return ` Chiptalar: ${context.raw.toLocaleString('uz-UZ')} ta`;
+                                }
                                 return ` Tushum: ${context.raw.toLocaleString('uz-UZ')} so'm (${formatMln(context.raw)})`;
                             }
                         }
@@ -1612,7 +1567,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         ticks: {
                             color: textColor,
                             font: { family: 'Plus Jakarta Sans', size: 11 },
-                            callback: function(val) { return (val / 1000000).toFixed(0) + ' M'; }
+                            callback: function(val) {
+                                if (currentSortMode === 'soni') return val;
+                                return (val / 1000000).toFixed(0) + ' M';
+                            }
                         },
                         grid: { color: gridColor }
                     },
@@ -1690,26 +1648,14 @@ document.addEventListener('DOMContentLoaded', () => {
         mappingEditorGrid.innerHTML = '';
 
         for (const [email, meta] of Object.entries(mappings)) {
-            const card = document.createElement('div');
-            card.className = 'target-card';
-            card.innerHTML = `
-                <h4><i class="fa-solid fa-envelope" style="color: var(--accent-violet)"></i> ${email}</h4>
-                <div class="target-inputs-row" style="grid-template-columns: 1.5fr 1fr 1fr; margin-top: 10px;">
-                    <div class="input-group">
-                        <label>Stansiya Nomi</label>
-                        <input type="text" class="input-control" data-email="${email}" data-field="station" value="${meta.station}">
-                    </div>
-                    <div class="input-group">
-                        <label>Soni Ustuni</label>
-                        <input type="number" class="input-control" data-email="${email}" data-field="col_soni" value="${meta.col_soni}">
-                    </div>
-                    <div class="input-group">
-                        <label>Summa Ustuni</label>
-                        <input type="number" class="input-control" data-email="${email}" data-field="col_summa" value="${meta.col_summa}">
-                    </div>
-                </div>
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><i class="fa-solid fa-envelope" style="color: var(--accent-violet); margin-right: 6px;"></i>${email}</td>
+                <td><input type="text" class="input-control" data-email="${email}" data-field="station" value="${meta.station}"></td>
+                <td><input type="number" class="input-control" data-email="${email}" data-field="col_soni" value="${meta.col_soni}"></td>
+                <td><input type="number" class="input-control" data-email="${email}" data-field="col_summa" value="${meta.col_summa}"></td>
             `;
-            mappingEditorGrid.appendChild(card);
+            mappingEditorGrid.appendChild(tr);
         }
     }
 
@@ -1732,34 +1678,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td><span class="status-badge" style="display: inline-flex;"><i class="fa-solid fa-check"></i> ${log.status}</span></td>
             `;
             uploadLogsTableBody.appendChild(tr);
-        });
-    }
-
-    function renderTable(stations, totalSumma) {
-        if (!tableBody) return;
-        tableBody.innerHTML = '';
-        if (!stations || stations.length === 0) {
-            tableBody.innerHTML = '<tr><td colspan="5" class="empty-row">Ma&#39;lumot topilmadi</td></tr>';
-            return;
-        }
-
-        stations.forEach((item, idx) => {
-            const tr = document.createElement('tr');
-            tr.className = 'clickable-station-row';
-            tr.title = `${item.stansiya} kassa ma'lumotlarini ochish uchun bosing`;
-            tr.onclick = () => openStationDetailsModal(item.stansiya);
-            const pct = totalSumma > 0 ? ((item.summa_val / totalSumma) * 100).toFixed(1) : 0;
-            const isAdmin = isCurrentUserAdmin();
-            const editBtnHtml = isAdmin ? `<button class="btn-icon-only btn-sm" style="margin-left:8px; color:var(--accent-amber); padding:2px 6px; font-size:11px;" title="Sotuvni tahrirlash" onclick="event.stopPropagation(); openQuickEditModal('${item.stansiya}', '${item.email}', '${currentSelectedPeriod}', ${item.soni_val}, ${item.summa_val})"><i class="fa-solid fa-pen"></i></button>` : '';
-
-            tr.innerHTML = `
-                <td><strong>${idx + 1}</strong></td>
-                <td><i class="fa-solid fa-location-dot" style="color: var(--accent-cyan); margin-right: 6px;"></i> <strong>${item.stansiya}</strong> ${editBtnHtml}</td>
-                <td><strong>${item.soni_val.toLocaleString('uz-UZ')} ta</strong></td>
-                <td><strong style="color: var(--accent-emerald);">${item.summa_val.toLocaleString('uz-UZ')} so'm</strong></td>
-                <td><span class="badge-percent">${pct}%</span></td>
-            `;
-            tableBody.appendChild(tr);
         });
     }
 
@@ -1802,18 +1720,27 @@ document.addEventListener('DOMContentLoaded', () => {
         dailyTableBody.innerHTML = '';
 
         if (!dailyTrend || dailyTrend.length === 0) {
-            dailyTableBody.innerHTML = '<tr><td colspan="6" class="empty-row">Kunlik ma&#39;lumot topilmadi</td></tr>';
+            dailyTableBody.innerHTML = '<tr><td colspan="5" class="empty-row">Kunlik ma&#39;lumot topilmadi</td></tr>';
             return;
         }
 
         dailyTrend.forEach(item => {
             const tr = document.createElement('tr');
+            const payTotal = (item.online_tickets || 0) + (item.terminal_tickets || 0) || 1;
+            const onlinePct = ((item.online_tickets || 0) / payTotal * 100).toFixed(1);
+            const terminalPct = (100 - onlinePct).toFixed(1);
             tr.innerHTML = `
                 <td><strong>${item.date}</strong></td>
                 <td><strong>${item.tickets.toLocaleString('uz-UZ')} ta</strong></td>
                 <td><strong style="color: var(--accent-emerald);">${item.summa.toLocaleString('uz-UZ')} so'm</strong></td>
-                <td><span style="color: var(--accent-cyan); font-weight: 600;">${item.online_tickets.toLocaleString()} (${(item.online_summa / 1000000).toFixed(1)}M)</span></td>
-                <td><span style="color: var(--accent-violet); font-weight: 600;">${item.terminal_tickets.toLocaleString()} (${(item.terminal_summa / 1000000).toFixed(1)}M)</span></td>
+                <td>
+                    <div class="payment-type-cell" title="Online: ${item.online_tickets.toLocaleString()} ta (${(item.online_summa / 1000000).toFixed(1)}M so'm) | Terminal: ${item.terminal_tickets.toLocaleString()} ta (${(item.terminal_summa / 1000000).toFixed(1)}M so'm)">
+                        <div class="payment-type-track">
+                            <div class="payment-type-fill online" style="width: ${onlinePct}%;"></div>
+                        </div>
+                        <span class="payment-type-label"><i class="fa-solid fa-globe" style="color: var(--accent-cyan);"></i> ${onlinePct}% / <i class="fa-solid fa-credit-card" style="color: var(--accent-violet);"></i> ${terminalPct}%</span>
+                    </div>
+                </td>
                 <td><span class="status-badge"><i class="fa-solid fa-check"></i> Aniq</span></td>
             `;
             dailyTableBody.appendChild(tr);
@@ -1986,90 +1913,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     },
                     y: {
                         ticks: { color: textColor, font: { family: 'Plus Jakarta Sans', size: 11 } },
-                        grid: { display: false }
-                    }
-                }
-            }
-        });
-    }
-
-    /* HORIZONTAL REVENUE CHART IN OVERVIEW TAB */
-    function renderRevenueChart(stations) {
-        const ctx = document.getElementById('revenueChart');
-        if (!ctx) return;
-
-        if (revenueChartInstance) {
-            revenueChartInstance.destroy();
-        }
-
-        const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-        const textColor = isLight ? '#475569' : '#94a3b8';
-        const gridColor = isLight ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.05)';
-
-        const chartCtx = ctx.getContext('2d');
-        const gradient = chartCtx.createLinearGradient(0, 0, 400, 0);
-        gradient.addColorStop(0, 'rgba(56, 189, 248, 0.9)');
-        gradient.addColorStop(1, 'rgba(59, 130, 246, 0.7)');
-
-        const sorted = [...stations].sort((a, b) => b.summa_val - a.summa_val);
-        const labels = sorted.map((s, i) => `${i + 1}. ${s.stansiya}`);
-        const data = currentSortMode === 'soni' ? sorted.map(s => s.soni_val) : sorted.map(s => s.summa_val);
-        const labelText = currentSortMode === 'soni' ? 'Sotilgan Chiptalar Soni' : 'Tushgan Summa (so\'m)';
-
-        revenueChartInstance = new Chart(chartCtx, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: labelText,
-                    data: data,
-                    backgroundColor: gradient,
-                    borderColor: '#38bdf8',
-                    borderWidth: 1,
-                    borderRadius: 6,
-                    barThickness: 16
-                }]
-            },
-            options: {
-                indexAxis: 'y', // HORIZONTAL BAR CHART
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        backgroundColor: isLight ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 23, 42, 0.95)',
-                        titleColor: isLight ? '#0f172a' : '#f8fafc',
-                        bodyColor: isLight ? '#334155' : '#e2e8f0',
-                        borderColor: isLight ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)',
-                        borderWidth: 1,
-                        padding: 12,
-                        callbacks: {
-                            label: function(context) {
-                                if (currentSortMode === 'soni') {
-                                    return ' Chiptalar: ' + context.raw.toLocaleString('uz-UZ') + ' ta';
-                                }
-                                return ' Tushum: ' + context.raw.toLocaleString('uz-UZ') + ' so\'m';
-                            }
-                        }
-                    }
-                },
-                scales: {
-                    x: {
-                        ticks: {
-                            color: textColor,
-                            font: { family: 'Plus Jakarta Sans', size: 11 },
-                            callback: function(val) {
-                                if (currentSortMode === 'soni') return val;
-                                return (val / 1000000).toFixed(0) + ' M';
-                            }
-                        },
-                        grid: { color: gridColor }
-                    },
-                    y: {
-                        ticks: {
-                            color: textColor,
-                            font: { family: 'Plus Jakarta Sans', size: 12, weight: '600' }
-                        },
                         grid: { display: false }
                     }
                 }

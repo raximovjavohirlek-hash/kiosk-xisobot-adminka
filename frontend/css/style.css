@@ -315,6 +315,20 @@ body {
     transform: translateY(-1px);
 }
 
+.btn-outline.btn-compact {
+    padding: 0 12px;
+}
+
+.btn-outline.btn-compact span {
+    display: none;
+}
+
+@media (min-width: 1400px) {
+    .btn-outline.btn-compact span {
+        display: inline;
+    }
+}
+
 .btn-icon-only {
     width: 38px;
     height: 38px;
@@ -410,6 +424,58 @@ body {
 .tab-content.active {
     display: flex;
     animation: fadeIn 0.4s ease-in-out;
+}
+
+/* Admin Center Sub-Navigation */
+.admin-subnav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px;
+    border-radius: var(--radius-md);
+}
+
+.admin-subnav-btn {
+    padding: 10px 16px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: var(--transition);
+}
+
+.admin-subnav-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.admin-subnav-btn.active {
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(59, 130, 246, 0.15));
+    color: var(--accent-cyan);
+    border-color: rgba(56, 189, 248, 0.3);
+}
+
+.admin-subsection {
+    display: none;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.admin-subsection.active {
+    display: flex;
+    animation: fadeIn 0.4s ease-in-out;
+}
+
+/* Compact Email/Station Mapping Table */
+.mapping-table input.input-control {
+    width: 100%;
 }
 
 @keyframes fadeIn {
@@ -1027,10 +1093,10 @@ body {
 }
 
 .role-badge.director {
-    background: linear-gradient(135deg, rgba(167, 139, 250, 0.25), rgba(236, 72, 153, 0.25));
-    color: #f472b6;
-    border: 1px solid rgba(236, 72, 153, 0.4);
-    box-shadow: 0 0 15px rgba(236, 72, 153, 0.2);
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(167, 139, 250, 0.25));
+    color: var(--accent-violet);
+    border: 1px solid rgba(167, 139, 250, 0.4);
+    box-shadow: 0 0 15px rgba(167, 139, 250, 0.2);
 }
 
 .role-badge.admin {
@@ -1042,8 +1108,8 @@ body {
 /* Glow Cards & Executive Cards */
 .glow-card {
     position: relative;
-    border-color: rgba(167, 139, 250, 0.4) !important;
-    box-shadow: 0 0 30px rgba(167, 139, 250, 0.15);
+    border-color: rgba(56, 189, 248, 0.4) !important;
+    box-shadow: 0 0 30px rgba(56, 189, 248, 0.15);
 }
 
 .kpi-progress-bar-wrapper {
@@ -1446,6 +1512,35 @@ body.tv-mode .nav-tabs-bar {
 
 .matrix-progress-fill.total {
     background: linear-gradient(90deg, #10b981, #059669);
+}
+
+/* Daily Table: Merged Online/Terminal Payment-Type Indicator */
+.payment-type-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 160px;
+}
+
+.payment-type-track {
+    height: 7px;
+    border-radius: 10px;
+    background: var(--accent-violet);
+    overflow: hidden;
+}
+
+.payment-type-fill.online {
+    height: 100%;
+    background: var(--accent-cyan);
+}
+
+.payment-type-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
 
 /* Highlighted Total Foot Row */
