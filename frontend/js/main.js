@@ -1056,7 +1056,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.openQuickEditModal = openQuickEditModal;
 
-    // Load Initial Data with Auth check
+    // Load Initial Data unconditionally for public stats, then check auth for admin controls
+    fetchStats();
     checkAuthentication();
 
     // Drag & Drop Handling
