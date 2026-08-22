@@ -707,8 +707,14 @@ def get_stats():
         from database import get_all_stats_from_db
         db_stats = get_all_stats_from_db(db_path, email_map)
         if db_stats:
-            STATS_CACHE = db_stats
-            return jsonify({'success': True, 'stats': db_stats, 'monthly_reports': db_stats.get('monthly_data', {})})
+            stats = enrich_stats_with_executive_metrics(
+                db_stats['monthly_data'],
+                db_stats['overall_data'],
+                db_stats['ytd_data'],
+                db_stats['available_months']
+            )
+            STATS_CACHE = stats
+            return jsonify({'success': True, 'stats': stats, 'monthly_reports': stats.get('monthly_data', {})})
     except Exception as db_err:
         print("[DB] Stats query warning:", db_err)
 
@@ -780,7 +786,18 @@ def upload_file():
             return jsonify({'status': 'error', 'message': parse_result.get('message')}), 400
 
         invalidate_stats_cache()
-        stats = process_excel(data_path, report_path, uploaded_path=save_path)
+        from database import get_all_stats_from_db
+        db_stats = get_all_stats_from_db(db_path, email_map)
+        if db_stats:
+            stats = enrich_stats_with_executive_metrics(
+                db_stats['monthly_data'],
+                db_stats['overall_data'],
+                db_stats['ytd_data'],
+                db_stats['available_months']
+            )
+        else:
+            stats = process_excel(data_path, report_path, uploaded_path=save_path)
+
         global STATS_CACHE
         STATS_CACHE = stats
         
