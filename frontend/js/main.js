@@ -447,8 +447,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const adminTabBtn = document.querySelector('.tab-btn[data-tab="tab-admin"]');
         const uploadSection = document.querySelector('.upload-section');
         const headerTokenBadge = document.getElementById('headerTokenBadge');
-        
-        if (adminTabBtn) adminTabBtn.style.display = 'inline-flex';
+        const isRoleAdmin = isCurrentUserAdmin();
+
+        if (adminTabBtn) adminTabBtn.style.display = isRoleAdmin ? 'inline-flex' : 'none';
+        if (adminAuthBtn) adminAuthBtn.style.display = isRoleAdmin ? 'inline-flex' : 'none';
+
+        if (!isRoleAdmin) {
+            if (uploadSection) uploadSection.style.display = 'none';
+            if (headerTokenBadge) headerTokenBadge.style.display = 'none';
+            const activeTab = document.querySelector('.tab-btn.active');
+            if (activeTab && activeTab.getAttribute('data-tab') === 'tab-admin') {
+                const dashboardTabBtn = document.querySelector('.tab-btn[data-tab="tab-dashboard"]');
+                if (dashboardTabBtn) dashboardTabBtn.click();
+            }
+            return;
+        }
 
         if (adminAuthBtn) {
             if (isAdminLoggedIn) {
@@ -562,6 +575,9 @@ document.addEventListener('DOMContentLoaded', () => {
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             const targetTabName = btn.getAttribute('data-tab');
+            if (targetTabName === 'tab-admin' && !isCurrentUserAdmin()) {
+                return;
+            }
             if (targetTabName === 'tab-admin' && !isAdminLoggedIn) {
                 openAdminModal();
                 return;
@@ -678,6 +694,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const userObj = JSON.parse(authUser);
                 if (systemLoginGateModal) systemLoginGateModal.style.display = 'none';
                 if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+                updateAdminAuthStateUI();
                 fetchStats();
                 fetchMappings();
                 fetchUploadLogs();
