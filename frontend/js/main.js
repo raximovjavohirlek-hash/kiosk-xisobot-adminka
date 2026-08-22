@@ -683,6 +683,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 fetchMappings();
                 fetchUploadLogs();
                 fetchUsers();
+                fetchOverrides();
                 return true;
             } catch (e) {
                 localStorage.removeItem('auth_user');
@@ -739,6 +740,14 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast('info', 'Chiqildi', 'Tizimdan chiqdingiz.');
             setTimeout(() => { window.location.reload(); }, 600);
         });
+    }
+
+    function renderDashboard(stats) {
+        fullBackendStats = stats;
+        populatePeriodDropdowns(stats);
+        populateOverrideDropdowns(stats);
+        fetchOverrides();
+        applyPeriodFilter();
     }
 
     // User Management Logic
@@ -853,6 +862,199 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
+
+    // ==========================================
+    // MANUAL STATION SALES OVERRIDE LOGIC
+    // ==========================================
+    const overrideForm = document.getElementById('overrideForm');
+    const overrideYmSelect = document.getElementById('overrideYmSelect');
+    const overrideEmailSelect = document.getElementById('overrideEmailSelect');
+    const overrideTicketsInput = document.getElementById('overrideTicketsInput');
+    const overrideSummaInput = document.getElementById('overrideSummaInput');
+    const overridesTableBody = document.getElementById('overridesTableBody');
+
+    function populateOverrideDropdowns(stats) {
+        if (overrideYmSelect) {
+            overrideYmSelect.innerHTML = '';
+            const availableMonths = stats ? (stats.available_months || []) : [];
+            availableMonths.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.code;
+                opt.textContent = m.name;
+                overrideYmSelect.appendChild(opt);
+            });
+        }
+
+        if (overrideEmailSelect && currentMappings) {
+            overrideEmailSelect.innerHTML = '';
+            Object.entries(currentMappings).forEach(([email, meta]) => {
+                const opt = document.createElement('option');
+                opt.value = email;
+                opt.textContent = `${meta.station || email} (${email})`;
+                overrideEmailSelect.appendChild(opt);
+            });
+        }
+    }
+
+    function fetchOverrides() {
+        if (!overridesTableBody) return;
+        fetch(getApiUrl('/api/admin/overrides'), {
+            headers: authHeaders()
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success && data.overrides) {
+                renderOverridesTable(data.overrides);
+            }
+        })
+        .catch(err => console.log('fetchOverrides error:', err));
+    }
+
+    function renderOverridesTable(overrides) {
+        if (!overridesTableBody) return;
+        overridesTableBody.innerHTML = '';
+        if (overrides.length === 0) {
+            overridesTableBody.innerHTML = '<tr><td colspan="6" class="empty-row">Qo\'lda kiritilgan tahrirlar yo\'q</td></tr>';
+            return;
+        }
+
+        overrides.forEach(ov => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><strong>${ov.ym}</strong></td>
+                <td>${ov.station_name || ov.email}</td>
+                <td><span class="number-cell-tickets">${ov.override_tickets !== null && ov.override_tickets !== undefined ? ov.override_tickets.toLocaleString('uz-UZ') + ' ta' : 'Asl'}</span></td>
+                <td><span class="number-cell-summa">${ov.override_summa !== null && ov.override_summa !== undefined ? ov.override_summa.toLocaleString('uz-UZ') + " so'm" : 'Asl'}</span></td>
+                <td style="font-size: 12px; opacity: 0.8;">${ov.updated_at || '-'}</td>
+                <td>
+                    <button class="btn-icon-only btn-sm" style="color: var(--accent-rose);" onclick="deleteOverride('${ov.ym}', '${ov.email}')" title="Tahrirni bekor qilish">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                </td>
+            `;
+            overridesTableBody.appendChild(tr);
+        });
+    }
+
+    window.deleteOverride = function(ym, email) {
+        if (!confirm(`${ym} oyi uchun ushbu kassa tahririni bekor qilmoqchimisiz?`)) return;
+        fetch(getApiUrl('/api/admin/overrides'), {
+            method: 'DELETE',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ ym, email })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast('success', 'Bekor qilindi', data.message);
+                fetchOverrides();
+                if (data.stats) renderDashboard(data.stats);
+            } else {
+                showToast('error', 'Xatolik', data.error);
+            }
+        })
+        .catch(err => showToast('error', 'Xatolik', err.message));
+    };
+
+    if (overrideForm) {
+        overrideForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const ym = overrideYmSelect ? overrideYmSelect.value : '';
+            const email = overrideEmailSelect ? overrideEmailSelect.value : '';
+            const tickets = overrideTicketsInput ? overrideTicketsInput.value : '';
+            const summa = overrideSummaInput ? overrideSummaInput.value : '';
+
+            if (!ym || !email || !tickets) {
+                showToast('warning', 'Ogohlantirish', "Hisobot oyi, kassa hamda chiptalar sonini kiriting!");
+                return;
+            }
+
+            fetch(getApiUrl('/api/admin/override-station'), {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ ym, email, tickets, summa })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('success', 'Muvaffaqiyatli Saqlandi!', data.message);
+                    if (overrideTicketsInput) overrideTicketsInput.value = '';
+                    if (overrideSummaInput) overrideSummaInput.value = '';
+                    fetchOverrides();
+                    if (data.stats) renderDashboard(data.stats);
+                } else {
+                    showToast('error', 'Xatolik', data.error);
+                }
+            })
+            .catch(err => showToast('error', 'Xatolik', err.message));
+        });
+    }
+
+    // Quick Edit Station Modal Handlers
+    const quickEditStationModal = document.getElementById('quickEditStationModal');
+    const quickEditStationForm = document.getElementById('quickEditStationForm');
+    const closeQuickEditModalBtn = document.getElementById('closeQuickEditModalBtn');
+    const cancelQuickEditBtn = document.getElementById('cancelQuickEditBtn');
+
+    const quickEditYm = document.getElementById('quickEditYm');
+    const quickEditEmail = document.getElementById('quickEditEmail');
+    const quickEditStationName = document.getElementById('quickEditStationName');
+    const quickEditMonthLabel = document.getElementById('quickEditMonthLabel');
+    const quickEditTicketsInput = document.getElementById('quickEditTicketsInput');
+    const quickEditSummaInput = document.getElementById('quickEditSummaInput');
+
+    function openQuickEditModal(stationName, email, ymCode, currentTickets, currentSumma) {
+        if (!quickEditStationModal) return;
+        const actualYm = (ymCode === 'ytd' || ymCode === 'all' || ymCode === 'latest' || !ymCode) 
+            ? (fullBackendStats && fullBackendStats.available_months && fullBackendStats.available_months.length > 0 ? fullBackendStats.available_months[0].code : '2026-08')
+            : ymCode;
+
+        if (quickEditYm) quickEditYm.value = actualYm;
+        if (quickEditEmail) quickEditEmail.value = email;
+        if (quickEditStationName) quickEditStationName.value = stationName;
+        if (quickEditMonthLabel) quickEditMonthLabel.value = actualYm;
+        if (quickEditTicketsInput) quickEditTicketsInput.value = currentTickets || '';
+        if (quickEditSummaInput) quickEditSummaInput.value = currentSumma || '';
+
+        quickEditStationModal.style.display = 'flex';
+    }
+
+    function closeQuickEditModal() {
+        if (quickEditStationModal) quickEditStationModal.style.display = 'none';
+    }
+
+    if (closeQuickEditModalBtn) closeQuickEditModalBtn.addEventListener('click', closeQuickEditModal);
+    if (cancelQuickEditBtn) cancelQuickEditBtn.addEventListener('click', closeQuickEditModal);
+
+    if (quickEditStationForm) {
+        quickEditStationForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const ym = quickEditYm.value;
+            const email = quickEditEmail.value;
+            const tickets = quickEditTicketsInput.value;
+            const summa = quickEditSummaInput.value;
+
+            fetch(getApiUrl('/api/admin/override-station'), {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ ym, email, tickets, summa })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('success', 'Tahrir Saqlandi!', data.message);
+                    closeQuickEditModal();
+                    fetchOverrides();
+                    if (data.stats) renderDashboard(data.stats);
+                } else {
+                    showToast('error', 'Xatolik', data.error);
+                }
+            })
+            .catch(err => showToast('error', 'Xatolik', err.message));
+        });
+    }
+
+    window.openQuickEditModal = openQuickEditModal;
 
     // Load Initial Data with Auth check
     checkAuthentication();
@@ -1260,12 +1462,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     else if (idx === 1) rankBadgeHtml = `<span class="rank-badge rank-2" title="2-O'rin"><i class="fa-solid fa-medal"></i> 2</span>`;
                     else if (idx === 2) rankBadgeHtml = `<span class="rank-badge rank-3" title="3-O'rin"><i class="fa-solid fa-medal"></i> 3</span>`;
 
+                    const isAdmin = getAdminAuthToken();
+                    const editBtnHtml = isAdmin ? `<button class="btn-icon-only btn-sm" style="margin-left:8px; color:var(--accent-amber); padding:2px 6px; font-size:11px;" title="Sotuvni tahrirlash" onclick="event.stopPropagation(); openQuickEditModal('${st.stansiya}', '${st.email}', '${currentSelectedPeriod}', ${st.soni_val}, ${st.summa_val})"><i class="fa-solid fa-pen"></i></button>` : '';
+
                     tr.innerHTML = `
                         <td style="text-align: center;">${rankBadgeHtml}</td>
                         <td>
                             <div class="st-cell">
                                 <div class="st-icon"><i class="fa-solid fa-train-subway"></i></div>
-                                <span class="st-name">${st.stansiya}</span>
+                                <span class="st-name">${st.stansiya}</span> ${editBtnHtml}
                             </div>
                         </td>
                         <td style="text-align: right;">
@@ -1529,10 +1734,12 @@ document.addEventListener('DOMContentLoaded', () => {
             tr.title = `${item.stansiya} kassa ma'lumotlarini ochish uchun bosing`;
             tr.onclick = () => openStationDetailsModal(item.stansiya);
             const pct = totalSumma > 0 ? ((item.summa_val / totalSumma) * 100).toFixed(1) : 0;
+            const isAdmin = getAdminAuthToken();
+            const editBtnHtml = isAdmin ? `<button class="btn-icon-only btn-sm" style="margin-left:8px; color:var(--accent-amber); padding:2px 6px; font-size:11px;" title="Sotuvni tahrirlash" onclick="event.stopPropagation(); openQuickEditModal('${item.stansiya}', '${item.email}', '${currentSelectedPeriod}', ${item.soni_val}, ${item.summa_val})"><i class="fa-solid fa-pen"></i></button>` : '';
 
             tr.innerHTML = `
                 <td><strong>${idx + 1}</strong></td>
-                <td><i class="fa-solid fa-location-dot" style="color: var(--accent-cyan); margin-right: 6px;"></i> <strong>${item.stansiya}</strong></td>
+                <td><i class="fa-solid fa-location-dot" style="color: var(--accent-cyan); margin-right: 6px;"></i> <strong>${item.stansiya}</strong> ${editBtnHtml}</td>
                 <td><strong>${item.soni_val.toLocaleString('uz-UZ')} ta</strong></td>
                 <td><strong style="color: var(--accent-emerald);">${item.summa_val.toLocaleString('uz-UZ')} so'm</strong></td>
                 <td><span class="badge-percent">${pct}%</span></td>

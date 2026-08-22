@@ -718,6 +718,78 @@
                     </div>
                 </section>
 
+                <!-- Manual Station Sales Override (Admin Only) -->
+                <section class="glass-card section-padding" style="margin-bottom: 24px;">
+                    <div class="card-header flex-between">
+                        <div>
+                            <h2><i class="fa-solid fa-pen-to-square" style="color: var(--accent-amber);"></i> Kassalar Sotuvini Qo'lda Tahrirlash (Kiosk Sales Override)</h2>
+                            <p class="section-desc">Kam sotuv ko'rsatgan kassalar uchun chiptalar soni va tushum summasini qo'lda o'zgartirish (bazaga to'g'ridan-to'g mezon bilan saqlanadi)</p>
+                        </div>
+                    </div>
+                    
+                    <form id="overrideForm" style="margin-top: 16px; background: rgba(0, 0, 0, 0.15); padding: 18px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.08);">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; align-items: end;">
+                            <div>
+                                <label for="overrideYmSelect" style="font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px;">
+                                    <i class="fa-solid fa-calendar-days"></i> Hisobot Oyi:
+                                </label>
+                                <select id="overrideYmSelect" class="input-control" style="width: 100%;">
+                                    <!-- Populated dynamically -->
+                                </select>
+                            </div>
+                            <div>
+                                <label for="overrideEmailSelect" style="font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px;">
+                                    <i class="fa-solid fa-store"></i> Kassa / Stansiya:
+                                </label>
+                                <select id="overrideEmailSelect" class="input-control" style="width: 100%;">
+                                    <!-- Populated dynamically -->
+                                </select>
+                            </div>
+                            <div>
+                                <label for="overrideTicketsInput" style="font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px;">
+                                    <i class="fa-solid fa-ticket"></i> Yangi Chiptalar Soni (ta):
+                                </label>
+                                <input type="number" id="overrideTicketsInput" class="input-control" placeholder="Masalan: 500" min="0" required style="width: 100%;">
+                            </div>
+                            <div>
+                                <label for="overrideSummaInput" style="font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px;">
+                                    <i class="fa-solid fa-wallet"></i> Yangi Jami Summa (so'm):
+                                </label>
+                                <input type="number" id="overrideSummaInput" class="input-control" placeholder="Avto-hisob / Majburiy emas" min="0" style="width: 100%;">
+                            </div>
+                            <div>
+                                <button type="submit" class="btn btn-amber" id="saveOverrideBtn" style="width: 100%; height: 42px; justify-content: center; font-weight: 700;">
+                                    <i class="fa-solid fa-floppy-disk"></i> Bazaga Saqlash
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+
+                    <!-- Active Overrides Table -->
+                    <div style="margin-top: 20px;">
+                        <h4 style="font-size: 14px; font-weight: 700; margin-bottom: 10px; color: var(--text-primary);">
+                            <i class="fa-solid fa-list-check" style="color: var(--accent-cyan);"></i> Qo'lda Kiritilgan Tahrirlar Ro'yxati
+                        </h4>
+                        <div class="table-responsive" style="max-height: 220px; overflow-y: auto;">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Oy</th>
+                                        <th>Kassa Nomi</th>
+                                        <th>Chiptalar Soni</th>
+                                        <th>Jami Summa</th>
+                                        <th>Kiritilgan Vaqt</th>
+                                        <th>Amal</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="overridesTableBody">
+                                    <tr><td colspan="6" class="empty-row">Qo'lda kiritilgan tahrirlar yo'q</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- Admin Email Mappings Editor -->
                 <section class="glass-card section-padding" style="margin-bottom: 24px;">
                     <div class="card-header flex-between">
@@ -968,6 +1040,46 @@
                 <button type="submit" class="btn btn-primary" id="systemLoginSubmitBtn" style="height: 44px; justify-content: center; font-size: 15px; font-weight: 700; margin-top: 8px;">
                     <i class="fa-solid fa-right-to-bracket"></i> Kirish
                 </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Quick Edit Station Sales Modal for Admin -->
+    <div class="modal-backdrop" id="quickEditStationModal" style="display: none;">
+        <div class="modal-card glass-card glow-border" style="max-width: 460px; text-align: left;">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-pen-to-square" style="color: var(--accent-amber);"></i> Kassa Sotuvini Tahrirlash</h3>
+                <button class="modal-close-btn" id="closeQuickEditModalBtn">&times;</button>
+            </div>
+            <form id="quickEditStationForm" style="margin-top: 14px; display: flex; flex-direction: column; gap: 14px;">
+                <input type="hidden" id="quickEditYm">
+                <input type="hidden" id="quickEditEmail">
+                <div>
+                    <label style="font-size: 12.5px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Kassa Nomi:</label>
+                    <input type="text" id="quickEditStationName" class="input-control" readonly style="opacity: 0.8; font-weight: 700; width: 100%;">
+                </div>
+                <div>
+                    <label style="font-size: 12.5px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Hisobot Oyi:</label>
+                    <input type="text" id="quickEditMonthLabel" class="input-control" readonly style="opacity: 0.8; width: 100%;">
+                </div>
+                <div>
+                    <label for="quickEditTicketsInput" style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">
+                        <i class="fa-solid fa-ticket" style="color: var(--accent-cyan);"></i> Yangi Sotilgan Chiptalar Soni (ta):
+                    </label>
+                    <input type="number" id="quickEditTicketsInput" class="input-control" placeholder="Chiptalar sonini kiriting..." min="0" required style="width: 100%;">
+                </div>
+                <div>
+                    <label for="quickEditSummaInput" style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">
+                        <i class="fa-solid fa-wallet" style="color: var(--accent-emerald);"></i> Yangi Jami Summa (so'm):
+                    </label>
+                    <input type="number" id="quickEditSummaInput" class="input-control" placeholder="Avto-hisoblash uchun bo'sh qoldiring..." min="0" style="width: 100%;">
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px;">
+                    <button type="button" class="btn btn-secondary" id="cancelQuickEditBtn">Bekor qilish</button>
+                    <button type="submit" class="btn btn-amber" style="font-weight: 700;">
+                        <i class="fa-solid fa-floppy-disk"></i> Bazaga Saqlash
+                    </button>
+                </div>
             </form>
         </div>
     </div>

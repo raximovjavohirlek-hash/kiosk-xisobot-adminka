@@ -1279,6 +1279,84 @@ def get_token_health():
         'health': health
     })
 
+@app.route('/api/admin/override-station', methods=['POST'])
+@require_auth(role='admin')
+def override_station_stats():
+    try:
+        data = request.json or {}
+        ym = str(data.get('ym', '')).strip()
+        email = str(data.get('email', '')).strip().lower()
+        tickets = data.get('tickets')
+        summa = data.get('summa')
+
+        if not ym or not email:
+            return jsonify({'success': False, 'error': "Hisobot oyi (ym) va kassa pochtasi kiritilishi shart!"}), 400
+
+        if tickets is None and summa is None:
+            return jsonify({'success': False, 'error': "Chiptalar soni yoki summa kiritilishi shart!"}), 400
+
+        db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+        email_map = load_mappings()
+
+        from database import save_station_override, get_all_stats_from_db
+        save_station_override(db_path, ym, email, tickets, summa, email_map)
+
+        invalidate_stats_cache()
+        db_stats = get_all_stats_from_db(db_path, email_map)
+        if db_stats:
+            stats = enrich_stats_with_executive_metrics(
+                db_stats['monthly_data'],
+                db_stats['overall_data'],
+                db_stats['ytd_data'],
+                db_stats['available_months']
+            )
+            global STATS_CACHE
+            STATS_CACHE = stats
+        else:
+            stats = None
+
+        station_name = email_map.get(email, {}).get('station', email)
+        return jsonify({
+            'success': True,
+            'message': f"'{station_name}' kassasining {ym} oyi uchun ko'rsatkichlari muvaffaqiyatli o'zgartirildi va ma'lumotlar bazasiga saqlandi!",
+            'stats': stats
+        })
+    except Exception as ex:
+        print("override_station_stats error:", ex)
+        return jsonify({'success': False, 'error': f"O'zgartirishni saqlashda xatolik: {str(ex)}"}), 500
+
+@app.route('/api/admin/overrides', methods=['GET', 'DELETE'])
+@require_auth(role='admin')
+def handle_overrides():
+    db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+    email_map = load_mappings()
+    from database import get_station_overrides, delete_station_override, get_all_stats_from_db
+
+    if request.method == 'DELETE':
+        data = request.json or {}
+        ym = str(data.get('ym', '')).strip()
+        email = str(data.get('email', '')).strip().lower()
+        if not ym or not email:
+            return jsonify({'success': False, 'error': "Hisobot oyi va pochta kiritilishi shart!"}), 400
+        delete_station_override(db_path, ym, email, email_map)
+        invalidate_stats_cache()
+        db_stats = get_all_stats_from_db(db_path, email_map)
+        if db_stats:
+            stats = enrich_stats_with_executive_metrics(
+                db_stats['monthly_data'],
+                db_stats['overall_data'],
+                db_stats['ytd_data'],
+                db_stats['available_months']
+            )
+            global STATS_CACHE
+            STATS_CACHE = stats
+        else:
+            stats = None
+        return jsonify({'success': True, 'message': "Tahrir bekor qilindi va asl ko'rsatkichlar tiklandi!", 'stats': stats})
+    else:
+        overrides = get_station_overrides(db_path)
+        return jsonify({'success': True, 'overrides': overrides})
+
 @app.route('/api/admin/fetch-api-excel', methods=['POST'])
 @require_auth(role='admin')
 def fetch_api_excel():

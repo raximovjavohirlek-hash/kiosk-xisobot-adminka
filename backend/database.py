@@ -91,8 +91,265 @@ def init_db(db_path):
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_tickets_user ON tickets(user_email)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_tickets_station ON tickets(station_name)')
 
+    # 6. Station Manual Overrides Table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS station_overrides (
+            ym TEXT NOT NULL,
+            email TEXT NOT NULL,
+            station_name TEXT,
+            override_tickets INTEGER,
+            override_summa REAL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY(ym, email)
+        )
+    ''')
+
     conn.commit()
     conn.close()
+
+def rebuild_aggregates_from_tickets(db_path, email_map):
+    """
+    Rebuilds all summary tables (monthly_summaries, station_monthly_stats,
+    daily_stats, station_daily_breakdown) directly from the deduplicated
+    tickets table in SQLite database, applying any admin manual overrides.
+    Guarantees 100% idempotency, accurate station shares, and zero duplicates!
+    """
+    if not email_map:
+        from app import load_mappings
+        email_map = load_mappings()
+
+    init_db(db_path)
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("SELECT DISTINCT ym FROM tickets WHERE ym IS NOT NULL AND ym != ''")
+        ym_rows = cursor.fetchall()
+        
+        allowed_emails = [k.strip().lower() for k in email_map.keys()] if email_map else []
+        placeholders = ','.join('?' * len(allowed_emails))
+
+        # Get active manual overrides
+        cursor.execute("SELECT ym, LOWER(TRIM(email)) as email, override_tickets, override_summa FROM station_overrides")
+        override_rows = cursor.fetchall()
+        overrides_map = {}
+        for ov in override_rows:
+            ov_ym = str(ov['ym']).strip().strip("'").strip('"')
+            ov_em = str(ov['email']).strip().lower()
+            overrides_map[(ov_ym, ov_em)] = (ov['override_tickets'], ov['override_summa'])
+
+        for yr in ym_rows:
+            ym_raw = yr['ym']
+            ym = str(ym_raw).strip().strip("'").strip('"')
+
+            # Calculate station monthly stats (with manual overrides applied)
+            month_station_data = {}
+            for email, meta in email_map.items():
+                st_name = meta['station']
+                em_lower = email.strip().lower()
+
+                cursor.execute('''
+                    SELECT SUM(qty), SUM(summa)
+                    FROM tickets
+                    WHERE (ym = ? OR ym = ?) AND LOWER(TRIM(user_email)) = ?
+                ''', (ym, ym_raw, em_lower))
+                st_row = cursor.fetchone()
+                raw_t = int(st_row[0] or 0)
+                raw_s = float(st_row[1] or 0.0)
+
+                st_tickets = raw_t
+                st_summa = raw_s
+
+                # Apply manual admin override if present
+                if (ym, em_lower) in overrides_map:
+                    ov_t, ov_s = overrides_map[(ym, em_lower)]
+                    if ov_t is not None:
+                        st_tickets = int(ov_t)
+                    if ov_s is not None:
+                        st_summa = float(ov_s)
+                    elif ov_t is not None and raw_t > 0 and raw_s > 0:
+                        st_summa = round(st_tickets * (raw_s / raw_t))
+
+                month_station_data[em_lower] = {
+                    'station_name': st_name,
+                    'email': em_lower,
+                    'tickets': st_tickets,
+                    'summa': st_summa
+                }
+
+            tot_tickets = sum(d['tickets'] for d in month_station_data.values())
+            tot_summa = sum(d['summa'] for d in month_station_data.values())
+
+            # Update monthly_summaries for this ym
+            cursor.execute('''
+                INSERT INTO monthly_summaries (ym, total_tickets, total_summa, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(ym) DO UPDATE SET
+                    total_tickets = excluded.total_tickets,
+                    total_summa = excluded.total_summa,
+                    updated_at = CURRENT_TIMESTAMP
+            ''', (ym, tot_tickets, tot_summa))
+
+            # Update station_monthly_stats for each station in this ym
+            for em_lower, sdata in month_station_data.items():
+                st_tix = sdata['tickets']
+                st_sum = sdata['summa']
+                sh_pct = round((st_sum / tot_summa * 100), 1) if tot_summa > 0 else 0.0
+
+                cursor.execute('''
+                    INSERT INTO station_monthly_stats (ym, station_name, email, tickets, summa, share_percent)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(ym, email) DO UPDATE SET
+                        station_name = excluded.station_name,
+                        tickets = excluded.tickets,
+                        summa = excluded.summa,
+                        share_percent = excluded.share_percent
+                ''', (ym, sdata['station_name'], sdata['email'], st_tix, st_sum, sh_pct))
+
+                # Update station_daily_breakdown proportionally
+                cursor.execute('''
+                    SELECT date_str, SUM(qty), SUM(summa)
+                    FROM tickets
+                    WHERE ym = ? AND LOWER(TRIM(user_email)) = ?
+                    GROUP BY date_str
+                    ORDER BY date_str ASC
+                ''', (ym, em_lower))
+                sdb_rows = cursor.fetchall()
+                
+                if sdb_rows:
+                    raw_sdb_tix = sum(int(r[1] or 0) for r in sdb_rows)
+                    raw_sdb_sum = sum(float(r[2] or 0.0) for r in sdb_rows)
+                    
+                    scale_t = st_tix / raw_sdb_tix if raw_sdb_tix > 0 else 1.0
+                    scale_s = st_sum / raw_sdb_sum if raw_sdb_sum > 0 else scale_t
+
+                    accum_t = 0
+                    accum_s = 0.0
+                    for idx_sdb, sdb in enumerate(sdb_rows):
+                        d_str = sdb[0]
+                        if not d_str:
+                            continue
+                        if idx_sdb == len(sdb_rows) - 1:
+                            d_tix = max(0, st_tix - accum_t)
+                            d_sum = max(0.0, st_sum - accum_s)
+                        else:
+                            d_tix = round(int(sdb[1] or 0) * scale_t)
+                            d_sum = round(float(sdb[2] or 0.0) * scale_s)
+                            accum_t += d_tix
+                            accum_s += d_sum
+
+                        cursor.execute('''
+                            INSERT INTO station_daily_breakdown (ym, date_str, email, tickets, summa)
+                            VALUES (?, ?, ?, ?, ?)
+                            ON CONFLICT(ym, date_str, email) DO UPDATE SET
+                                tickets = excluded.tickets,
+                                summa = excluded.summa
+                        ''', (ym, d_str, sdata['email'], d_tix, d_sum))
+
+            # Overall daily trend for the month
+            cursor.execute(f'''
+                SELECT date_str,
+                       SUM(qty) as total_tickets,
+                       SUM(summa) as total_summa,
+                       SUM(CASE WHEN payment_type = 'Online' THEN qty ELSE 0 END) as online_tickets,
+                       SUM(CASE WHEN payment_type = 'Online' THEN summa ELSE 0 END) as online_summa,
+                       SUM(CASE WHEN payment_type = 'Terminal' THEN qty ELSE 0 END) as terminal_tickets,
+                       SUM(CASE WHEN payment_type = 'Terminal' THEN summa ELSE 0 END) as terminal_summa
+                FROM tickets
+                WHERE ym = ? AND LOWER(TRIM(user_email)) IN ({placeholders})
+                GROUP BY date_str
+                ORDER BY date_str ASC
+            ''', [ym] + allowed_emails)
+            
+            dt_rows = cursor.fetchall()
+            for d in dt_rows:
+                d_str = d[0]
+                if d_str:
+                    cursor.execute('''
+                        INSERT INTO daily_stats (ym, date_str, total_tickets, total_summa, online_tickets, online_summa, terminal_tickets, terminal_summa)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(ym, date_str) DO UPDATE SET
+                            total_tickets = excluded.total_tickets,
+                            total_summa = excluded.total_summa,
+                            online_tickets = excluded.online_tickets,
+                            online_summa = excluded.online_summa,
+                            terminal_tickets = excluded.terminal_tickets,
+                            terminal_summa = excluded.terminal_summa
+                    ''', (ym, d_str, int(d[1] or 0), float(d[2] or 0.0), int(d[3] or 0), float(d[4] or 0.0), int(d[5] or 0), float(d[6] or 0.0)))
+
+        conn.commit()
+    except Exception as ex:
+        print("[DB] rebuild_aggregates_from_tickets error:", ex)
+        conn.rollback()
+    finally:
+        conn.close()
+
+def save_station_override(db_path, ym, email, override_tickets, override_summa=None, email_map=None):
+    """
+    Saves or updates a manual admin override for a specific station and month.
+    Recalculates station monthly stats, share percentages, and monthly summary in SQLite.
+    """
+    init_db(db_path)
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+
+    try:
+        ym_clean = str(ym).strip().strip("'").strip('"')
+        email_clean = str(email).strip().lower()
+        st_name = email_map.get(email_clean, {}).get('station', email_clean) if email_map else email_clean
+
+        t_val = int(override_tickets) if override_tickets is not None and str(override_tickets).strip() != '' else None
+        s_val = float(override_summa) if override_summa is not None and str(override_summa).strip() != '' else None
+
+        cursor.execute('''
+            INSERT INTO station_overrides (ym, email, station_name, override_tickets, override_summa, updated_at)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(ym, email) DO UPDATE SET
+                override_tickets = excluded.override_tickets,
+                override_summa = excluded.override_summa,
+                station_name = excluded.station_name,
+                updated_at = CURRENT_TIMESTAMP
+        ''', (ym_clean, email_clean, st_name, t_val, s_val))
+        conn.commit()
+    except Exception as ex:
+        print("[DB] save_station_override error:", ex)
+        conn.rollback()
+    finally:
+        conn.close()
+
+    rebuild_aggregates_from_tickets(db_path, email_map)
+
+def get_station_overrides(db_path):
+    """Returns list of active manual admin overrides."""
+    init_db(db_path)
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT ym, email, station_name, override_tickets, override_summa, updated_at FROM station_overrides ORDER BY ym DESC, station_name ASC")
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+        return rows
+    except Exception as ex:
+        print("[DB] get_station_overrides error:", ex)
+        conn.close()
+        return []
+
+def delete_station_override(db_path, ym, email, email_map=None):
+    """Deletes an active admin override and rebuilds raw stats."""
+    init_db(db_path)
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    try:
+        ym_clean = str(ym).strip().strip("'").strip('"')
+        cursor.execute("DELETE FROM station_overrides WHERE (ym = ? OR ym = ?) AND LOWER(TRIM(email)) = ?", (ym, ym_clean, email.strip().lower()))
+        conn.commit()
+    except Exception as ex:
+        print("[DB] delete_station_override error:", ex)
+        conn.rollback()
+    finally:
+        conn.close()
+
+    rebuild_aggregates_from_tickets(db_path, email_map)
 
 def batch_upsert_tickets(db_path, ticket_list, batch_size=1000):
     """
@@ -357,134 +614,6 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
             'status': 'error',
             'message': f"Excel faylini tahlil qilishda kutilmagan xatolik: {str(ex)}"
         }
-
-def rebuild_aggregates_from_tickets(db_path, email_map):
-    """
-    Rebuilds all summary tables (monthly_summaries, station_monthly_stats,
-    daily_stats, station_daily_breakdown) directly from the deduplicated
-    tickets table in SQLite database.
-    Guarantees 100% idempotency, accurate station shares, and zero duplicates!
-    """
-    init_db(db_path)
-    conn = get_db_connection(db_path)
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute("SELECT DISTINCT ym FROM tickets WHERE ym IS NOT NULL AND ym != ''")
-        ym_rows = cursor.fetchall()
-        
-        allowed_emails = [k.strip().lower() for k in email_map.keys()] if email_map else []
-        if not allowed_emails:
-            conn.close()
-            return
-
-        placeholders = ','.join('?' * len(allowed_emails))
-
-        for yr in ym_rows:
-            ym = yr['ym']
-
-            # Total monthly tickets & summa for whitelisted kiosk accounts
-            cursor.execute(f'''
-                SELECT SUM(qty), SUM(summa) 
-                FROM tickets 
-                WHERE ym = ? AND LOWER(TRIM(user_email)) IN ({placeholders})
-            ''', [ym] + allowed_emails)
-            
-            tot_row = cursor.fetchone()
-            tot_tickets = int(tot_row[0] or 0)
-            tot_summa = float(tot_row[1] or 0.0)
-
-            cursor.execute('''
-                INSERT INTO monthly_summaries (ym, total_tickets, total_summa, updated_at)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(ym) DO UPDATE SET
-                    total_tickets = excluded.total_tickets,
-                    total_summa = excluded.total_summa,
-                    updated_at = CURRENT_TIMESTAMP
-            ''', (ym, tot_tickets, tot_summa))
-
-            # Station breakdown per month
-            for email, meta in email_map.items():
-                st_name = meta['station']
-                cursor.execute('''
-                    SELECT SUM(qty), SUM(summa)
-                    FROM tickets
-                    WHERE ym = ? AND LOWER(TRIM(user_email)) = ?
-                ''', (ym, email.lower()))
-                st_row = cursor.fetchone()
-                st_tickets = int(st_row[0] or 0)
-                st_summa = float(st_row[1] or 0.0)
-                sh_pct = round((st_summa / tot_summa * 100), 1) if tot_summa > 0 else 0.0
-
-                cursor.execute('''
-                    INSERT INTO station_monthly_stats (ym, station_name, email, tickets, summa, share_percent)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(ym, email) DO UPDATE SET
-                        station_name = excluded.station_name,
-                        tickets = excluded.tickets,
-                        summa = excluded.summa,
-                        share_percent = excluded.share_percent
-                ''', (ym, st_name, email, st_tickets, st_summa, sh_pct))
-
-                # Station daily breakdown
-                cursor.execute('''
-                    SELECT date_str, SUM(qty), SUM(summa)
-                    FROM tickets
-                    WHERE ym = ? AND LOWER(TRIM(user_email)) = ?
-                    GROUP BY date_str
-                    ORDER BY date_str ASC
-                ''', (ym, email.lower()))
-                sdb_rows = cursor.fetchall()
-                for sdb in sdb_rows:
-                    d_str = sdb[0]
-                    d_tix = int(sdb[1] or 0)
-                    d_sum = float(sdb[2] or 0.0)
-                    if d_str:
-                        cursor.execute('''
-                            INSERT INTO station_daily_breakdown (ym, date_str, email, tickets, summa)
-                            VALUES (?, ?, ?, ?, ?)
-                            ON CONFLICT(ym, date_str, email) DO UPDATE SET
-                                tickets = excluded.tickets,
-                                summa = excluded.summa
-                        ''', (ym, d_str, email, d_tix, d_sum))
-
-            # Overall daily trend for the month
-            cursor.execute(f'''
-                SELECT date_str,
-                       SUM(qty) as total_tickets,
-                       SUM(summa) as total_summa,
-                       SUM(CASE WHEN payment_type = 'Online' THEN qty ELSE 0 END) as online_tickets,
-                       SUM(CASE WHEN payment_type = 'Online' THEN summa ELSE 0 END) as online_summa,
-                       SUM(CASE WHEN payment_type = 'Terminal' THEN qty ELSE 0 END) as terminal_tickets,
-                       SUM(CASE WHEN payment_type = 'Terminal' THEN summa ELSE 0 END) as terminal_summa
-                FROM tickets
-                WHERE ym = ? AND LOWER(TRIM(user_email)) IN ({placeholders})
-                GROUP BY date_str
-                ORDER BY date_str ASC
-            ''', [ym] + allowed_emails)
-            
-            dt_rows = cursor.fetchall()
-            for d in dt_rows:
-                d_str = d[0]
-                if d_str:
-                    cursor.execute('''
-                        INSERT INTO daily_stats (ym, date_str, total_tickets, total_summa, online_tickets, online_summa, terminal_tickets, terminal_summa)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(ym, date_str) DO UPDATE SET
-                            total_tickets = excluded.total_tickets,
-                            total_summa = excluded.total_summa,
-                            online_tickets = excluded.online_tickets,
-                            online_summa = excluded.online_summa,
-                            terminal_tickets = excluded.terminal_tickets,
-                            terminal_summa = excluded.terminal_summa
-                    ''', (ym, d_str, int(d[1] or 0), float(d[2] or 0.0), int(d[3] or 0), float(d[4] or 0.0), int(d[5] or 0), float(d[6] or 0.0)))
-
-        conn.commit()
-    except Exception as ex:
-        print("[DB] rebuild_aggregates_from_tickets error:", ex)
-        conn.rollback()
-    finally:
-        conn.close()
 
 def save_monthly_report_to_db(db_path, ym, stats):
     if not ym or not stats:
