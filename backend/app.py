@@ -45,7 +45,7 @@ CORS(app, origins=ALLOWED_ORIGINS, supports_credentials=True)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or os.urandom(32).hex()
 app.config['UPLOAD_FOLDER'] = os.path.dirname(os.path.abspath(__file__))
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB limit
-app.config['ADMIN_PASSWORD'] = os.environ.get('ADMIN_PASSWORD', 'admin')
+app.config['ADMIN_PASSWORD'] = os.environ.get('ADMIN_PASSWORD', 'Javo!QAZ')
 
 TOKEN_SERIALIZER = URLSafeTimedSerializer(app.config['SECRET_KEY'], salt='kiosk-auth-token')
 TOKEN_MAX_AGE_SECONDS = 8 * 60 * 60  # 8 hours
@@ -109,11 +109,11 @@ def load_users():
             pass
 
     if users is None:
-        default_pass = app.config.get('ADMIN_PASSWORD', 'admin')
+        default_pass = app.config.get('ADMIN_PASSWORD', 'Javo!QAZ')
         users = [{
-            "username": "admin",
+            "username": "Javohir",
             "password": generate_password_hash(default_pass, method='pbkdf2:sha256'),
-            "name": "Bosh Administrator",
+            "name": "Bosh Administrator (Javohir)",
             "role": "admin",
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }]
@@ -696,6 +696,7 @@ def enrich_stats_with_executive_metrics(monthly_data_map, overall_data_map, ytd_
     }
 
 @app.route('/api/stats', methods=['GET'])
+@require_auth()
 def get_stats():
     global STATS_CACHE
     if STATS_CACHE is not None:
@@ -861,6 +862,7 @@ def sync_tickets():
         return jsonify({'status': 'error', 'message': f"JSON sync xatoligi: {str(e)}"}), 500
 
 @app.route('/api/tickets', methods=['GET'])
+@require_auth()
 def get_tickets():
     db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
     try:
@@ -878,11 +880,172 @@ def get_tickets():
         return jsonify({'success': False, 'error': str(ex)}), 500
 
 @app.route('/api/download', methods=['GET'])
+@require_auth()
 def download():
+    period = request.args.get('period') or request.args.get('ym') or 'all'
+    db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+    email_map = load_mappings()
+
     report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
+
+    try:
+        from database import get_all_stats_from_db
+        db_stats = get_all_stats_from_db(db_path, email_map)
+    except Exception as ex:
+        print("get_all_stats_from_db error in download:", ex)
+        db_stats = None
+
+    if not db_stats:
+        data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
+        db_stats = process_excel(data_path, report_path)
+
+    if period in db_stats.get('monthly_data', {}):
+        selected_stats = db_stats['monthly_data'][period]
+        period_name = period
+    elif period == 'ytd' and 'ytd_data' in db_stats:
+        selected_stats = db_stats['ytd_data']
+        period_name = 'YTD'
+    else:
+        selected_stats = db_stats.get('overall_data') or db_stats
+        period_name = 'Barcha_Oylar'
+
+    # If template 'Август кисока.xlsx' exists, update and send it
     if os.path.exists(report_path):
-        return send_file(report_path, as_attachment=True, download_name='Август_киоска_hisobot.xlsx')
-    return jsonify({'error': 'Fayl topilmadi'}), 404
+        try:
+            wb = openpyxl.load_workbook(report_path)
+            out_buf = io.BytesIO()
+            wb.save(out_buf)
+            out_buf.seek(0)
+            return send_file(
+                out_buf,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                as_attachment=True,
+                download_name=f'Kiosk_Hisobot_{period_name}.xlsx'
+            )
+        except Exception as e:
+            print("Template update error, fallback to dynamic excel:", e)
+
+    # Dynamic openpyxl Workbook Generation
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Stansiyalar Hisoboti"
+    ws.views.sheetView[0].showGridLines = True
+
+    header_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+    header_font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+    data_font = Font(name="Arial", size=10)
+    bold_font = Font(name="Arial", size=10, bold=True)
+
+    thin_border = Border(
+        left=Side(style='thin', color='CBD5E1'),
+        right=Side(style='thin', color='CBD5E1'),
+        top=Side(style='thin', color='CBD5E1'),
+        bottom=Side(style='thin', color='CBD5E1')
+    )
+
+    ws.merge_cells('A1:G1')
+    ws['A1'] = f"Kiosklar Bo'yicha Chipta Sotuvi Hisoboti ({period_name})"
+    ws['A1'].font = Font(name="Arial", size=14, bold=True, color="0F172A")
+    ws['A1'].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 30
+
+    headers = ['№', 'Kassa Stansiyasi', 'Pochta Manzili', 'Chiptalar Soni (ta)', 'Tushum Summasi (so\'m)', 'Ulushi (%)', 'O\'rtacha Narx (so\'m)']
+    ws.append([])
+    ws.append(headers)
+    ws.row_dimensions[3].height = 25
+
+    for col_num, h in enumerate(headers, 1):
+        cell = ws.cell(row=3, column=col_num)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    stations = selected_stats.get('stations', [])
+    tot_tickets = selected_stats.get('total_tickets', sum(s.get('soni_val', 0) for s in stations))
+    tot_summa = selected_stats.get('total_summa', sum(s.get('summa_val', 0) for s in stations))
+
+    for idx, st in enumerate(stations, 1):
+        s_name = st.get('stansiya', '')
+        email = st.get('email', '')
+        soni = st.get('soni_val', 0)
+        summa = st.get('summa_val', 0)
+        pct = st.get('share_percent', round((summa / tot_summa * 100), 1) if tot_summa else 0.0)
+        avg_p = round(summa / soni) if soni > 0 else 0
+
+        r_idx = idx + 3
+        ws.append([idx, s_name, email, soni, summa, pct, avg_p])
+
+        ws.cell(row=r_idx, column=1).alignment = Alignment(horizontal="center")
+        ws.cell(row=r_idx, column=4).number_format = '#,##0'
+        ws.cell(row=r_idx, column=5).number_format = '#,##0'
+        ws.cell(row=r_idx, column=6).number_format = '0.0'
+        ws.cell(row=r_idx, column=7).number_format = '#,##0'
+
+        for c_idx in range(1, 8):
+            cell = ws.cell(row=r_idx, column=c_idx)
+            cell.font = data_font
+            cell.border = thin_border
+
+    tot_row_idx = len(stations) + 4
+    ws.append(['', 'JAMI', '', tot_tickets, tot_summa, 100.0, round(tot_summa / tot_tickets) if tot_tickets > 0 else 0])
+    for c_idx in range(1, 8):
+        cell = ws.cell(row=tot_row_idx, column=c_idx)
+        cell.font = bold_font
+        cell.border = thin_border
+        cell.fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+    ws.cell(row=tot_row_idx, column=4).number_format = '#,##0'
+    ws.cell(row=tot_row_idx, column=5).number_format = '#,##0'
+    ws.cell(row=tot_row_idx, column=6).number_format = '0.0'
+    ws.cell(row=tot_row_idx, column=7).number_format = '#,##0'
+
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+    ws_daily = wb.create_sheet(title="Kunlik Trend")
+    ws_daily.views.sheetView[0].showGridLines = True
+    d_headers = ['Sana', 'Jami Chiptalar (ta)', 'Jami Summa (so\'m)', 'Online Chiptalar', 'Online Summa', 'Terminal Chiptalar', 'Terminal Summa']
+    ws_daily.append(d_headers)
+    for col_num, h in enumerate(d_headers, 1):
+        cell = ws_daily.cell(row=1, column=col_num)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    daily_trend = selected_stats.get('daily_trend', [])
+    for r_i, dt in enumerate(daily_trend, 2):
+        ws_daily.append([
+            dt.get('date', ''),
+            dt.get('tickets', 0),
+            dt.get('summa', 0),
+            dt.get('online_tickets', 0),
+            dt.get('online_summa', 0),
+            dt.get('terminal_tickets', 0),
+            dt.get('terminal_summa', 0)
+        ])
+        for c_i in range(1, 8):
+            cell = ws_daily.cell(row=r_i, column=c_i)
+            cell.font = data_font
+            cell.border = thin_border
+            if c_i >= 2:
+                cell.number_format = '#,##0'
+
+    for col in ws_daily.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws_daily.column_dimensions[col_letter].width = max(max_len + 4, 14)
+
+    out_buf = io.BytesIO()
+    wb.save(out_buf)
+    out_buf.seek(0)
+
+    return send_file(
+        out_buf,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=f'Kiosk_Hisobot_{period_name}.xlsx'
+    )
 
 @app.route('/api/export-station-excel/<path:station_name>', methods=['GET'])
 def export_station_excel(station_name):
@@ -1119,15 +1282,15 @@ def auth_login():
                 }
             })
 
-    if (username == 'admin' or not username) and password == app.config['ADMIN_PASSWORD']:
-        token = issue_token('admin', 'admin')
+    if (username in ('javohir', 'admin') or not username) and password == app.config['ADMIN_PASSWORD']:
+        token = issue_token('Javohir', 'admin')
         return jsonify({
             'success': True,
             'message': 'Bosh administrator sifatida kirdingiz!',
             'token': token,
             'user': {
-                'username': 'admin',
-                'name': 'Bosh Administrator',
+                'username': 'Javohir',
+                'name': 'Bosh Administrator (Javohir)',
                 'role': 'admin'
             }
         })
@@ -1185,99 +1348,6 @@ def delete_user(username):
         
     save_users(new_users)
     return jsonify({'success': True, 'message': f"Foydalanuvchi '{username_clean}' o'chirildi!"})
-
-TOKEN_FILE = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_token.json')
-
-def load_stored_token():
-    if os.path.exists(TOKEN_FILE):
-        try:
-            with open(TOKEN_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                return {
-                    'token': data.get('token', ''),
-                    'csrf_token': data.get('csrf_token', ''),
-                    'cookie': data.get('cookie', '')
-                }
-        except Exception:
-            pass
-    return {
-        'token': '',
-        'csrf_token': '',
-        'cookie': ''
-    }
-
-def save_stored_token(token, csrf_token=None, cookie=None):
-    current = load_stored_token()
-    new_token = token if token is not None else current.get('token', '')
-    new_csrf = csrf_token if csrf_token is not None else current.get('csrf_token', '')
-    new_cookie = cookie if cookie is not None else current.get('cookie', '')
-    with open(TOKEN_FILE, 'w', encoding='utf-8') as f:
-        json.dump({
-            'token': new_token,
-            'csrf_token': new_csrf,
-            'cookie': new_cookie,
-            'updated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }, f, ensure_ascii=False, indent=2)
-
-def check_jwt_health(token, csrf_token=None):
-    if not token or not token.strip():
-        return {
-            'valid': False,
-            'status': 'missing',
-            'message': "Bearer Token kiritilmagan",
-            'expires_in_minutes': 0,
-            'exp_datetime': None
-        }
-    return {
-        'valid': True,
-        'status': 'active',
-        'message': "Token va CSRF kiritilgan (Faol)",
-        'expires_in_minutes': 60,
-        'exp_datetime': None
-    }
-
-@app.route('/api/admin/token', methods=['GET', 'POST'])
-@require_auth(role='admin')
-def manage_token():
-    if request.method == 'POST':
-        data = request.json or {}
-        token = data.get('token', '').strip()
-        csrf_token = data.get('csrf_token', '').strip()
-        cookie = data.get('cookie', '').strip()
-        save_stored_token(token, csrf_token, cookie)
-        health = check_jwt_health(token, csrf_token)
-        return jsonify({
-            'success': True,
-            'message': 'Bearer Token va Sozlamalar saqlandi!',
-            'health': health
-        })
-    else:
-        info = load_stored_token()
-        token = info.get('token', '')
-        csrf_token = info.get('csrf_token', '')
-        cookie = info.get('cookie', '')
-        health = check_jwt_health(token, csrf_token)
-        masked_token = (token[:15] + '...' + token[-10:]) if len(token) > 30 else token
-        return jsonify({
-            'success': True,
-            'token': token,
-            'csrf_token': csrf_token,
-            'cookie': cookie,
-            'masked_token': masked_token,
-            'health': health
-        })
-
-@app.route('/api/admin/token-health', methods=['GET'])
-@require_auth(role='admin')
-def get_token_health():
-    info = load_stored_token()
-    token = info.get('token', '')
-    csrf_token = info.get('csrf_token', '')
-    health = check_jwt_health(token, csrf_token)
-    return jsonify({
-        'success': True,
-        'health': health
-    })
 
 @app.route('/api/admin/override-station', methods=['POST'])
 @require_auth(role='admin')
@@ -1356,165 +1426,6 @@ def handle_overrides():
     else:
         overrides = get_station_overrides(db_path)
         return jsonify({'success': True, 'overrides': overrides})
-
-@app.route('/api/admin/fetch-api-excel', methods=['POST'])
-@require_auth(role='admin')
-def fetch_api_excel():
-    data = request.json or {}
-    start_date = data.get('startDate', '').strip()
-    end_date = data.get('endDate', '').strip()
-    custom_token = data.get('token', '').strip()
-    custom_csrf = data.get('csrf_token', '').strip()
-    custom_cookie = data.get('cookie', '').strip()
-    
-    info = load_stored_token()
-    token = custom_token if custom_token else info.get('token', '')
-    csrf_token = custom_csrf if custom_csrf else info.get('csrf_token', '')
-    cookie_str = custom_cookie if custom_cookie else info.get('cookie', '')
-
-    if not token or not token.strip():
-        return jsonify({
-            'success': False,
-            'error': "Bearer Token kiritilmagan! Iltimos, Bearer Tokenni kiriting."
-        }), 400
-
-    if not start_date or not end_date:
-        return jsonify({
-            'success': False,
-            'error': "Boshlanish va tugash sanasini tanlang!"
-        }), 400
-
-    if not cookie_str or not csrf_token:
-        return jsonify({
-            'success': False,
-            'error': "Cookie yoki CSRF token kiritilmagan! Iltimos, barcha maydonlarni to'ldiring."
-        }), 400
-
-    clean_token = token.strip()
-    if clean_token.lower().startswith('bearer '):
-        clean_token = clean_token[7:].strip()
-
-    clean_csrf = csrf_token.strip()
-
-    api_url = "https://railway-admin.axonlogic.uz/api/v4/query/admin/orders/download/excel"
-    
-    headers = {
-        'Accept': 'application/json',
-        'Accept-Encoding': 'gzip, deflate, br, zstd',
-        'Accept-Language': 'ru',
-        'Authorization': f"Bearer {clean_token}",
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Content-Type': 'application/json',
-        'Cookie': cookie_str,
-        'Device-Type': 'BROWSER',
-        'Host': 'railway-admin.axonlogic.uz',
-        'Origin': 'https://railway-admin.axonlogic.uz',
-        'Pragma': 'no-cache',
-        'Referer': 'https://railway-admin.axonlogic.uz/cabinet/orders',
-        'Sec-Ch-Ua': '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"',
-        'Sec-Ch-Ua-Mobile': '?0',
-        'Sec-Ch-Ua-Platform': '"macOS"',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-origin',
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/150.0.0.0',
-        'x-xsrf-token': clean_csrf
-    }
-
-    date_from_str = f"{start_date} 00:00:00 +00:00" if len(start_date) == 10 else start_date
-    date_to_str = f"{end_date} 23:59:59 +00:00" if len(end_date) == 10 else end_date
-
-    payload = {
-        "filterData": {
-            "statuses": [
-                "ORDER_FINISHED_WITH_EXPRESS_E_TICKET_REGISTRATION_SUCCEEDED"
-            ],
-            "dateFrom": date_from_str,
-            "dateTo": date_to_str
-        }
-    }
-
-    try:
-        resp = requests.post(api_url, json=payload, headers=headers, timeout=120)
-        
-        if resp.status_code == 200:
-            if len(resp.content) < 100 and b"error" in resp.content.lower():
-                return jsonify({
-                    'success': False,
-                    'error': f"API dan kutilmagan javob keldi: {resp.text}",
-                    'request_payload': payload
-                }), 400
-
-            excel_bytes = None
-            try:
-                resp_json = resp.json()
-                if isinstance(resp_json, dict) and 'data' in resp_json:
-                    b64_str = resp_json['data']
-                    excel_bytes = base64.b64decode(b64_str)
-            except Exception:
-                pass
-
-            if not excel_bytes:
-                excel_bytes = resp.content
-
-            data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
-            report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
-
-            with open(data_path, 'wb') as f:
-                f.write(excel_bytes)
-
-            stats = process_excel(data_path, report_path)
-            add_upload_log(f"API Sync ({start_date} - {end_date})", len(excel_bytes), "Muvaffaqiyatli")
-
-            return jsonify({
-                'success': True,
-                'message': f"API orqali {start_date} - {end_date} davri uchun Excel ma'lumotlari muvaffaqiyatli yuklandi va yangilandi!",
-                'stats': stats,
-                'request_payload': payload
-            })
-        elif resp.status_code == 504:
-            add_upload_log(f"API Sync ({start_date} - {end_date})", 0, "504 Gateway Time-out")
-            return jsonify({
-                'success': False,
-                'error': "504 Gateway Time-out: Railway Admin serveri Excel tayyorlashda taym-aut berdi. Qaytadan urinib ko'ring yoki davrni qisqartiring.",
-                'request_payload': payload
-            }), 504
-        elif resp.status_code == 401:
-            add_upload_log(f"API Sync ({start_date} - {end_date})", 0, "401 Unauthorized")
-            return jsonify({
-                'success': False,
-                'error': "401 Unauthorized: Bearer Token yoki Cookie muddati tugagan. Iltimos, yangi tokenlarni kiriting.",
-                'request_payload': payload
-            }), 401
-        elif resp.status_code == 403:
-            add_upload_log(f"API Sync ({start_date} - {end_date})", 0, "403 Forbidden")
-            return jsonify({
-                'success': False,
-                'error': f"403 Forbidden: {resp.text[:300]}",
-                'request_payload': payload
-            }), 403
-        else:
-            add_upload_log(f"API Sync ({start_date} - {end_date})", 0, f"Xatolik: {resp.status_code}")
-            return jsonify({
-                'success': False,
-                'error': f"API serverida xatolik ({resp.status_code}): {resp.text[:300]}",
-                'request_payload': payload
-            }), resp.status_code
-
-    except requests.exceptions.Timeout:
-        add_upload_log(f"API Sync ({start_date} - {end_date})", 0, "Timeout xatoligi")
-        return jsonify({
-            'success': False,
-            'error': "API so'rovi vaqti tugadi (Timeout 120s).",
-            'request_payload': payload
-        }), 504
-    except Exception as ex:
-        add_upload_log(f"API Sync ({start_date} - {end_date})", 0, f"Xatolik: {str(ex)}")
-        return jsonify({
-            'success': False,
-            'error': f"API ga ulanishda xatolik yuz berdi: {str(ex)}"
-        }), 500
 
 @app.route('/api/director-summary', methods=['GET'])
 def get_director_summary():

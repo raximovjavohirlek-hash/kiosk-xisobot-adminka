@@ -573,29 +573,45 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
 
             p_val = str(row.get(pay_col) if pay_col else 'Terminal')
             p_type = 'Online' if any(k in p_val.lower() for k in ['online', 'онлайн', 'click', 'payme', 'uzum']) else 'Terminal'
-            t_num = str(row.get(ticket_col) if ticket_col and pd.notnull(row.get(ticket_col)) else '').strip()
+            order_code = str(row.get(ticket_col) if ticket_col and pd.notnull(row.get(ticket_col)) else '').strip()
 
-            if not t_num:
-                # Stable fallback identity built only from the row's own content
-                # (never the positional index), so the same real order always
-                # hashes to the same ticket_number across repeated uploads of
-                # the same export — this is what makes re-uploads idempotent.
-                tn_val = str(row.get(ticket_numbers_col) if ticket_numbers_col and pd.notnull(row.get(ticket_numbers_col)) else '').strip()
-                raw_str = f"{d_str}_{u_val}_{tn_val}_{q_val}_{s_val}_{p_val}"
-                t_num = "TICK_" + hashlib.sha256(raw_str.encode()).hexdigest()[:16].upper()
+            tn_val = str(row.get(ticket_numbers_col) if ticket_numbers_col and pd.notnull(row.get(ticket_numbers_col)) else '').strip()
+            ticket_nums_list = [t.strip() for t in re.split(r'[,;\s]+', tn_val) if t.strip()]
 
-            if d_str or s_val > 0 or q_val > 0:
-                ticket_rows.append({
-                    'ticket_number': t_num,
-                    'order_id': t_num,
-                    'date_str': d_str,
-                    'user_email': u_val,
-                    'station_name': st_name,
-                    'payment_type': p_type,
-                    'qty': q_val if q_val > 0 else 1,
-                    'summa': s_val,
-                    'status': 'ACTIVE'
-                })
+            if ticket_nums_list:
+                num_tickets = len(ticket_nums_list)
+                per_ticket_summa = round(s_val / num_tickets, 2) if num_tickets > 0 else s_val
+                for t_num in ticket_nums_list:
+                    if d_str or s_val > 0 or q_val > 0:
+                        ticket_rows.append({
+                            'ticket_number': t_num,
+                            'order_id': order_code or t_num,
+                            'date_str': d_str,
+                            'user_email': u_val,
+                            'station_name': st_name,
+                            'payment_type': p_type,
+                            'qty': 1,
+                            'summa': per_ticket_summa,
+                            'status': 'ACTIVE'
+                        })
+            else:
+                t_num = order_code
+                if not t_num:
+                    raw_str = f"{d_str}_{u_val}_{tn_val}_{q_val}_{s_val}_{p_val}"
+                    t_num = "TICK_" + hashlib.sha256(raw_str.encode()).hexdigest()[:16].upper()
+
+                if d_str or s_val > 0 or q_val > 0:
+                    ticket_rows.append({
+                        'ticket_number': t_num,
+                        'order_id': order_code or t_num,
+                        'date_str': d_str,
+                        'user_email': u_val,
+                        'station_name': st_name,
+                        'payment_type': p_type,
+                        'qty': q_val if q_val > 0 else 1,
+                        'summa': s_val,
+                        'status': 'ACTIVE'
+                    })
 
         metrics = batch_upsert_tickets(db_path, ticket_rows)
         metrics['skipped_not_whitelisted'] = skipped_not_whitelisted

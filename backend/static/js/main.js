@@ -1,5 +1,53 @@
+
+function formatMln(num) {
+    if (!num || isNaN(num)) return '0 mln';
+    const absNum = Math.abs(num);
+    if (absNum >= 1_000_000_000) {
+        return `${(num / 1_000_000_000).toFixed(2)} mlrd`;
+    } else if (absNum >= 1_000_000) {
+        return `${(num / 1_000_000).toFixed(1)} mln`;
+    } else {
+        return `${(num / 1_000).toFixed(1)} ming`;
+    }
+}
+
+function getShortCurrencyLabel(num) {
+    if (!num || isNaN(num) || num === 0) return '';
+    return `(${formatMln(num)})`;
+}
+
+function formatCurrency(num, plain = false) {
+    if (num === undefined || num === null || isNaN(num)) return "0 so'm";
+    const formatted = Math.round(num).toLocaleString('uz-UZ') + " so'm";
+    if (plain) return formatted;
+    const shortLabel = getShortCurrencyLabel(num);
+    return shortLabel ? `${formatted} ${shortLabel}` : formatted;
+}
+
+function isCurrentUserAdmin() {
+    const authUserStr = localStorage.getItem('auth_user');
+    if (authUserStr) {
+        try {
+            const u = JSON.parse(authUserStr);
+            if (u && u.role === 'admin') return true;
+        } catch (e) {}
+    }
+    if (sessionStorage.getItem('kiosk-admin-auth') === 'true') {
+        return true;
+    }
+    return false;
+}
+
+function getAdminAuthToken() {
+    return sessionStorage.getItem('kiosk-admin-token') || localStorage.getItem('auth_token') || '';
+}
+
+function authHeaders(extra = {}) {
+    const token = getAdminAuthToken();
+    return token ? { ...extra, 'Authorization': `Bearer ${token}` } : extra;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-    let revenueChartInstance = null;
     let trendChartInstance = null;
     let comparisonChartInstance = null;
     let directorHorizontalChartInstance = null;
@@ -62,14 +110,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const closeShareModalBtn = document.getElementById('closeShareModalBtn');
     const okShareModalBtn = document.getElementById('okShareModalBtn');
 
-    // Overview KPIs
-    const kpiTickets = document.getElementById('kpiTickets');
-    const kpiSumma = document.getElementById('kpiSumma');
-    const kpiTopStation = document.getElementById('kpiTopStation');
-    const kpiTopStationVal = document.getElementById('kpiTopStationVal');
-    const kpiRatio = document.getElementById('kpiRatio');
-    const kpiRatioSub = document.getElementById('kpiRatioSub');
-
     // Rahbariyat Dashboard Real KPI Elements
     const dirKpiNetRevenue = document.getElementById('dirKpiNetRevenue');
     const dirKpiTotalTickets = document.getElementById('dirKpiTotalTickets');
@@ -83,8 +123,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const directorMatrixTableBody = document.getElementById('directorMatrixTableBody');
 
     // Tables & Controls
-    const tableBody = document.getElementById('tableBody');
-    const tableSearch = document.getElementById('tableSearch');
     const stationCardsGrid = document.getElementById('stationCardsGrid');
     const dailyTableBody = document.getElementById('dailyTableBody');
 
@@ -94,7 +132,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const uploadLogsTableBody = document.getElementById('uploadLogsTableBody');
 
     const sortSegmentButtons = document.querySelectorAll('.sort-btn');
-    const sortableThs = document.querySelectorAll('.sortable-th');
 
     // Comparison Elements
     const compBaseMonth = document.getElementById('compBaseMonth');
@@ -153,7 +190,7 @@ document.addEventListener('DOMContentLoaded', () => {
         exportStationExcelBtn.addEventListener('click', () => {
             if (!currentActiveModalStation) return;
             showToast('info', 'Excel Yuklanmoqda...', `${currentActiveModalStation} kassa (${currentSelectedModalMonth}) hisoboti yuklanmoqda`);
-            window.location.href = `/api/export-station-excel/${encodeURIComponent(currentActiveModalStation)}?month=${currentSelectedModalMonth}`;
+            window.location.href = getApiUrl(`/api/export-station-excel/${encodeURIComponent(currentActiveModalStation)}?month=${currentSelectedModalMonth}`);
         });
     }
     if (stationDetailModal) {
@@ -162,11 +199,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function populateModalMonthSelect(activeCode = '2026-08') {
+    function populateModalMonthSelect(activeCode = 'ytd') {
         if (!modalStationMonthSelect) return;
         modalStationMonthSelect.innerHTML = '';
         
         const monthNamesMap = {
+            "ytd": "Shu Yil Boshidan (YTD)",
+            "all": "Barcha Oylar Birgalikda",
             "2026-08": "Avgust 2026",
             "2026-07": "Iyul 2026",
             "2026-06": "Iyun 2026",
@@ -177,7 +216,9 @@ document.addEventListener('DOMContentLoaded', () => {
             "2026-01": "Yanvar 2026"
         };
 
-        const keys = Object.keys(monthlyReportsData).length > 0 ? Object.keys(monthlyReportsData).sort().reverse() : ["2026-08", "2026-07", "2026-06", "2026-02"];
+        const keys = ["ytd", "all"];
+        const monthlyKeys = Object.keys(monthlyReportsData).length > 0 ? Object.keys(monthlyReportsData).sort().reverse() : ["2026-08", "2026-07", "2026-06", "2026-05", "2026-04", "2026-03", "2026-02", "2026-01"];
+        keys.push(...monthlyKeys);
 
         keys.forEach(ym => {
             const opt = document.createElement('option');
@@ -190,15 +231,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function openStationDetailsModal(stansiyaName) {
         currentActiveModalStation = stansiyaName;
-        currentSelectedModalMonth = currentSelectedPeriod && currentSelectedPeriod !== 'latest' ? currentSelectedPeriod : '2026-08';
+        currentSelectedModalMonth = currentSelectedPeriod || 'ytd';
         populateModalMonthSelect(currentSelectedModalMonth);
         renderStationModalForMonth(stansiyaName, currentSelectedModalMonth);
         if (stationDetailModal) stationDetailModal.style.display = 'flex';
     }
 
     function renderStationModalForMonth(stansiyaName, monthCode) {
-        let statsObj = fullBackendStats;
-        if (monthlyReportsData && monthlyReportsData[monthCode]) {
+        let statsObj = currentStats || fullBackendStats;
+        if (monthCode === 'ytd' && fullBackendStats && fullBackendStats.ytd_data) {
+            statsObj = fullBackendStats.ytd_data;
+        } else if (monthCode === 'all' && fullBackendStats && fullBackendStats.overall_data) {
+            statsObj = fullBackendStats.overall_data;
+        } else if (monthlyReportsData && monthlyReportsData[monthCode]) {
             statsObj = monthlyReportsData[monthCode];
         }
         if (!statsObj || !statsObj.stations) return;
@@ -230,7 +275,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Mini KPIs
         const avgCheck = st.soni_val > 0 ? Math.round(st.summa_val / st.soni_val) : 0;
-        if (modalStSumma) modalStSumma.textContent = `${st.summa_val.toLocaleString('uz-UZ')} so'm`;
+        if (modalStSumma) modalStSumma.textContent = formatCurrency(st.summa_val);
         if (modalStShare) modalStShare.textContent = `${st.share_percent}% umumiy ulush`;
         if (modalStTickets) modalStTickets.textContent = `${st.soni_val.toLocaleString('uz-UZ')} ta`;
         
@@ -286,7 +331,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Admin Auth State
-    let isAdminLoggedIn = sessionStorage.getItem('kiosk-admin-auth') === 'true';
+    let isAdminLoggedIn = sessionStorage.getItem('kiosk-admin-auth') === 'true' && !!sessionStorage.getItem('kiosk-admin-token');
     const adminAuthBtn = document.getElementById('adminAuthBtn');
     const adminLoginModal = document.getElementById('adminLoginModal');
     const adminPasswordInput = document.getElementById('adminPasswordInput');
@@ -307,11 +352,66 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Smooth TV Mode Auto-Scroll Engine
+    let tvScrollTimer = null;
+    let tvDirection = 1;
+    let tvIsPausing = false;
+
+    function startTvAutoScroll() {
+        stopTvAutoScroll();
+        tvDirection = 1;
+        tvIsPausing = false;
+
+        tvScrollTimer = setInterval(() => {
+            if (tvIsPausing) return;
+
+            const scrollPos = window.scrollY;
+            const windowHeight = window.innerHeight;
+            const fullHeight = document.documentElement.scrollHeight;
+
+            if (tvDirection === 1) {
+                if (scrollPos + windowHeight >= fullHeight - 15) {
+                    tvIsPausing = true;
+                    setTimeout(() => {
+                        tvDirection = -1;
+                        tvIsPausing = false;
+                    }, 2500);
+                } else {
+                    window.scrollBy({ top: 1.5, behavior: 'instant' });
+                }
+            } else {
+                if (scrollPos <= 15) {
+                    tvIsPausing = true;
+                    setTimeout(() => {
+                        tvDirection = 1;
+                        tvIsPausing = false;
+                    }, 2500);
+                } else {
+                    window.scrollBy({ top: -1.5, behavior: 'instant' });
+                }
+            }
+        }, 25);
+    }
+
+    function stopTvAutoScroll() {
+        if (tvScrollTimer) {
+            clearInterval(tvScrollTimer);
+            tvScrollTimer = null;
+        }
+    }
+
     if (tvModeBtn) {
         tvModeBtn.addEventListener('click', () => {
             document.body.classList.toggle('tv-mode');
             const isTv = document.body.classList.contains('tv-mode');
             tvModeBtn.innerHTML = isTv ? '<i class="fa-solid fa-compress"></i> Oddiy Rejim' : '<i class="fa-solid fa-tv"></i> TV Rejim';
+            if (isTv) {
+                startTvAutoScroll();
+                showToast('info', 'TV Rejim Yoqildi', "Ma'lumotlar yuqoridan pastga va pastdan yuqoriga sekin avto-skroll qilmoqda.");
+            } else {
+                stopTvAutoScroll();
+                showToast('info', 'Oddiy Rejim', "Avto-skroll to'xtatildi.");
+            }
         });
     }
 
@@ -336,12 +436,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         localStorage.setItem('kiosk-theme', theme);
         if (currentStats) {
-            renderRevenueChart(getSortedStations());
+            const sortedStations = getSortedStations();
+            renderDirectorDashboard(currentStats, sortedStations);
             renderTrendChart(currentStats.daily_trend);
             renderComparisonView();
-            if (fullBackendStats) {
-                renderDirectorDashboard(fullBackendStats);
-            }
         }
     }
 
@@ -349,58 +447,160 @@ document.addEventListener('DOMContentLoaded', () => {
         const adminTabBtn = document.querySelector('.tab-btn[data-tab="tab-admin"]');
         const uploadSection = document.querySelector('.upload-section');
         const headerTokenBadge = document.getElementById('headerTokenBadge');
-        
-        if (adminTabBtn) adminTabBtn.style.display = 'inline-flex';
+    function handleUnauthorizedAccess(msg) {
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_user');
+        sessionStorage.removeItem('kiosk-admin-auth');
+        sessionStorage.removeItem('kiosk-admin-token');
 
-        if (adminAuthBtn) {
-            if (isAdminLoggedIn) {
-                adminAuthBtn.innerHTML = '<i class="fa-solid fa-lock-open" style="color: var(--accent-emerald);"></i> Admin Rejimida (Chiqish)';
-                if (uploadSection) uploadSection.style.display = 'block';
-                if (headerTokenBadge) headerTokenBadge.style.display = 'inline-flex';
-            } else {
-                adminAuthBtn.innerHTML = '<i class="fa-solid fa-user-shield"></i> Admin Kirish';
-                if (uploadSection) uploadSection.style.display = 'none';
-                if (headerTokenBadge) headerTokenBadge.style.display = 'none';
-            }
-        }
-    }
-    updateAdminAuthStateUI();
+        const systemLoginGateModal = document.getElementById('systemLoginGateModal');
+        const systemLoginError = document.getElementById('systemLoginError');
+        const appContainer = document.getElementById('appContainer');
 
-    function openAdminModal() {
-        if (adminLoginModal) {
-            adminLoginModal.style.display = 'flex';
-            if (adminPasswordInput) {
-                adminPasswordInput.value = '';
-                adminPasswordInput.focus();
-            }
-            if (adminLoginError) adminLoginError.style.display = 'none';
+        if (appContainer) appContainer.style.display = 'none';
+        if (systemLoginGateModal) systemLoginGateModal.style.display = 'flex';
+
+        if (systemLoginError) {
+            systemLoginError.textContent = msg || "Sessiya muddati tugadi yoki avtorizatsiya qilinmagan. Login va parol kiriting.";
+            systemLoginError.style.display = 'block';
         }
     }
 
-    function closeAdminModal() {
-        if (adminLoginModal) adminLoginModal.style.display = 'none';
+    function checkAppAuthentication() {
+        const token = localStorage.getItem('auth_token') || sessionStorage.getItem('kiosk-admin-token');
+        const userStr = localStorage.getItem('auth_user');
+        const systemLoginGateModal = document.getElementById('systemLoginGateModal');
+        const appContainer = document.getElementById('appContainer');
+        const logoutBtn = document.getElementById('logoutBtn');
+        const adminTabBtn = document.querySelector('.tab-btn[data-tab="tab-admin"]');
+
+        if (!token || !userStr) {
+            if (appContainer) appContainer.style.display = 'none';
+            if (systemLoginGateModal) systemLoginGateModal.style.display = 'flex';
+            return false;
+        }
+
+        try {
+            const user = JSON.parse(userStr);
+            if (systemLoginGateModal) systemLoginGateModal.style.display = 'none';
+            if (appContainer) appContainer.style.display = 'block';
+
+            if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+
+            const userRoleBadge = document.getElementById('userRoleBadge');
+            if (userRoleBadge) {
+                userRoleBadge.innerHTML = `<i class="fa-solid fa-user-shield"></i> ${user.name || user.username} (${user.role === 'admin' ? 'Admin' : 'Foydalanuvchi'})`;
+            }
+
+            if (adminTabBtn) {
+                adminTabBtn.style.display = (user.role === 'admin') ? 'inline-flex' : 'none';
+            }
+
+            fetchStats();
+            if (user.role === 'admin') {
+                fetchUsers();
+                fetchOverrides();
+            }
+            return true;
+        } catch (e) {
+            handleUnauthorizedAccess("Foydalanuvchi ma'lumoti xatoga uchradi.");
+            return false;
+        }
     }
 
-    if (adminAuthBtn) {
-        adminAuthBtn.addEventListener('click', () => {
-            if (isAdminLoggedIn) {
-                isAdminLoggedIn = false;
-                sessionStorage.removeItem('kiosk-admin-auth');
-                updateAdminAuthStateUI();
-                showToast('info', 'Admin Rejimi', 'Admin rejimida chiqildi.');
-                const activeTab = document.querySelector('.tab-btn.active');
-                if (activeTab && activeTab.getAttribute('data-tab') === 'tab-admin') {
-                    const directorTabBtn = document.querySelector('.tab-btn[data-tab="tab-director"]');
-                    if (directorTabBtn) directorTabBtn.click();
+    // System Mandatory Login Form Handler
+    const systemLoginForm = document.getElementById('systemLoginForm');
+    const systemUsernameInput = document.getElementById('systemUsernameInput');
+    const systemPasswordInput = document.getElementById('systemPasswordInput');
+    const systemLoginError = document.getElementById('systemLoginError');
+    const systemLoginGateModal = document.getElementById('systemLoginGateModal');
+
+    if (systemLoginForm) {
+        systemLoginForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const username = systemUsernameInput ? systemUsernameInput.value.trim() : '';
+            const password = systemPasswordInput ? systemPasswordInput.value.trim() : '';
+
+            if (!username || !password) {
+                if (systemLoginError) {
+                    systemLoginError.textContent = "Login va parol kiritilishi shart!";
+                    systemLoginError.style.display = 'block';
                 }
-            } else {
-                openAdminModal();
+                return;
             }
+
+            const submitBtn = document.getElementById('systemLoginSubmitBtn');
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Tekshirilmoqda...';
+            }
+
+            fetch(getApiUrl('/api/auth/login'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success && data.token) {
+                    localStorage.setItem('auth_token', data.token);
+                    localStorage.setItem('auth_user', JSON.stringify(data.user));
+                    sessionStorage.setItem('kiosk-admin-auth', 'true');
+                    sessionStorage.setItem('kiosk-admin-token', data.token);
+
+                    if (systemLoginGateModal) systemLoginGateModal.style.display = 'none';
+                    if (systemLoginError) systemLoginError.style.display = 'none';
+
+                    showToast('success', 'Xush Kelibsiz!', data.message || 'Tizimga kirdingiz');
+                    checkAppAuthentication();
+                } else {
+                    if (systemLoginError) {
+                        systemLoginError.textContent = data.error || "Login yoki parol noto'g'ri!";
+                        systemLoginError.style.display = 'block';
+                    }
+                }
+            })
+            .catch(err => {
+                if (systemLoginError) {
+                    systemLoginError.textContent = "Ulanishda xatolik: " + err;
+                    systemLoginError.style.display = 'block';
+                }
+            })
+            .finally(() => {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Kirish';
+                }
+            });
         });
     }
 
-    if (closeAdminModalBtn) closeAdminModalBtn.addEventListener('click', closeAdminModal);
-    if (cancelAdminModalBtn) cancelAdminModalBtn.addEventListener('click', closeAdminModal);
+    // Logout Handler
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+            handleUnauthorizedAccess('Tizimdan muvaffaqiyatli chiqdingiz.');
+            showToast('info', 'Tizimdan Chiqildi', 'Sessiya yakunlandi.');
+        });
+    }
+
+    // Toggle Password Visibility Handlers
+    document.querySelectorAll('.toggle-password-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const wrapper = btn.closest('.password-input-wrapper');
+            const input = wrapper ? wrapper.querySelector('input') : null;
+            const icon = btn.querySelector('i');
+            if (input) {
+                if (input.type === 'password') {
+                    input.type = 'text';
+                    if (icon) icon.className = 'fa-solid fa-eye-slash';
+                } else {
+                    input.type = 'password';
+                    if (icon) icon.className = 'fa-solid fa-eye';
+                }
+            }
+        });
+    });
 
     function performAdminLogin() {
         const pwd = adminPasswordInput ? adminPasswordInput.value.trim() : '';
@@ -412,7 +612,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        fetch('/api/admin/login', {
+        fetch(getApiUrl('/api/admin/login'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ password: pwd })
@@ -422,6 +622,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.success) {
                 isAdminLoggedIn = true;
                 sessionStorage.setItem('kiosk-admin-auth', 'true');
+                if (data.token) sessionStorage.setItem('kiosk-admin-token', data.token);
                 updateAdminAuthStateUI();
                 closeAdminModal();
 
@@ -462,6 +663,9 @@ document.addEventListener('DOMContentLoaded', () => {
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             const targetTabName = btn.getAttribute('data-tab');
+            if (targetTabName === 'tab-admin' && !isCurrentUserAdmin()) {
+                return;
+            }
             if (targetTabName === 'tab-admin' && !isAdminLoggedIn) {
                 openAdminModal();
                 return;
@@ -481,17 +685,25 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    // Admin Center Sub-Navigation
+    const adminSubnavBtns = document.querySelectorAll('.admin-subnav-btn');
+    const adminSubsections = document.querySelectorAll('.admin-subsection');
+
+    adminSubnavBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetSubtab = btn.getAttribute('data-subtab');
+            adminSubnavBtns.forEach(b => b.classList.remove('active'));
+            adminSubsections.forEach(s => s.classList.remove('active'));
+            btn.classList.add('active');
+            const targetSection = document.getElementById(targetSubtab);
+            if (targetSection) targetSection.classList.add('active');
+        });
+    });
+
     // Business Sort Handlers
     sortSegmentButtons.forEach(btn => {
         btn.addEventListener('click', () => {
             const sortMode = btn.getAttribute('data-sort');
-            setSortMode(sortMode);
-        });
-    });
-
-    sortableThs.forEach(th => {
-        th.addEventListener('click', () => {
-            const sortMode = th.getAttribute('data-sort-key');
             setSortMode(sortMode);
         });
     });
@@ -507,19 +719,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        sortableThs.forEach(th => {
-            if (th.getAttribute('data-sort-key') === mode) {
-                th.classList.add('active');
-            } else {
-                th.classList.remove('active');
-            }
-        });
-
         if (currentStats) {
             const sortedStations = getSortedStations();
-            renderTable(sortedStations, currentStats.total_summa);
+            renderDirectorDashboard(currentStats, sortedStations);
             renderStationCards(sortedStations, currentStats.total_summa);
-            renderRevenueChart(sortedStations);
         }
     }
 
@@ -544,6 +747,17 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Excel Download Action
+    const downloadBtn = document.getElementById('downloadBtn');
+    if (downloadBtn) {
+        downloadBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const period = currentSelectedPeriod || 'all';
+            const downloadUrl = getApiUrl(`/api/download?period=${encodeURIComponent(period)}`);
+            window.location.href = downloadUrl;
+        });
+    }
+
     // Period Select Listener
     if (periodSelect) {
         periodSelect.addEventListener('change', (e) => {
@@ -563,10 +777,424 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Load Initial Data
-    fetchStats();
-    fetchMappings();
-    fetchUploadLogs();
+
+    // Authentication & System Login Gate
+    const systemLoginGateModal = document.getElementById('systemLoginGateModal');
+    const systemLoginForm = document.getElementById('systemLoginForm');
+    const systemUsernameInput = document.getElementById('systemUsernameInput');
+    const systemPasswordInput = document.getElementById('systemPasswordInput');
+    const systemLoginError = document.getElementById('systemLoginError');
+    const logoutBtn = document.getElementById('logoutBtn');
+
+    function checkAuthentication() {
+        const authUser = localStorage.getItem('auth_user');
+        if (authUser) {
+            try {
+                const userObj = JSON.parse(authUser);
+                if (systemLoginGateModal) systemLoginGateModal.style.display = 'none';
+                if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+                updateAdminAuthStateUI();
+                fetchStats();
+                fetchMappings();
+                fetchUploadLogs();
+                fetchUsers();
+                fetchOverrides();
+                return true;
+            } catch (e) {
+                localStorage.removeItem('auth_user');
+            }
+        }
+        if (systemLoginGateModal) systemLoginGateModal.style.display = 'flex';
+        if (logoutBtn) logoutBtn.style.display = 'none';
+        return false;
+    }
+
+    if (systemLoginForm) {
+        systemLoginForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const username = systemUsernameInput.value.trim();
+            const password = systemPasswordInput.value.trim();
+            if (!username || !password) return;
+
+            if (systemLoginError) systemLoginError.style.display = 'none';
+
+            fetch(getApiUrl('/api/auth/login'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    localStorage.setItem('auth_user', JSON.stringify(data.user));
+                    if (data.token) localStorage.setItem('auth_token', data.token);
+                    if (systemLoginGateModal) systemLoginGateModal.style.display = 'none';
+                    if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+                    showToast('success', 'Xush kelibsiz!', data.message || 'Tizimga muvaffaqiyatli kirdingiz.');
+                    checkAuthentication();
+                } else {
+                    if (systemLoginError) {
+                        systemLoginError.textContent = data.error || "Login yoki parol noto'g'ri!";
+                        systemLoginError.style.display = 'block';
+                    }
+                }
+            })
+            .catch(err => {
+                if (systemLoginError) {
+                    systemLoginError.textContent = 'Serverga ulanishda xatolik: ' + err.message;
+                    systemLoginError.style.display = 'block';
+                }
+            });
+        });
+    }
+
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+            localStorage.removeItem('auth_user');
+            localStorage.removeItem('auth_token');
+            showToast('info', 'Chiqildi', 'Tizimdan chiqdingiz.');
+            setTimeout(() => { window.location.reload(); }, 600);
+        });
+    }
+
+    function renderDashboard(stats) {
+        fullBackendStats = stats;
+        populatePeriodDropdowns(stats);
+        populateOverrideDropdowns(stats);
+        fetchOverrides();
+        applyPeriodFilter();
+    }
+
+    // User Management Logic
+    const addUserForm = document.getElementById('addUserForm');
+    const newUsernameInput = document.getElementById('newUsernameInput');
+    const newPasswordInput = document.getElementById('newPasswordInput');
+    const newNameInput = document.getElementById('newNameInput');
+    const newRoleSelect = document.getElementById('newRoleSelect');
+    const usersTableBody = document.getElementById('usersTableBody');
+
+    function fetchUsers() {
+        if (!usersTableBody) return;
+        fetch(getApiUrl('/api/users'), { headers: authHeaders() })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success && data.users) {
+                renderUsersTable(data.users);
+            }
+        })
+        .catch(err => console.error("fetchUsers error:", err));
+    }
+
+    function renderUsersTable(users) {
+        if (!usersTableBody) return;
+        usersTableBody.innerHTML = '';
+        if (users.length === 0) {
+            usersTableBody.innerHTML = '<tr><td colspan="4" class="empty-row">Foydalanuvchilar yo&apos;q</td></tr>';
+            return;
+        }
+        users.forEach(u => {
+            const tr = document.createElement('tr');
+            const isMasterAdmin = u.username.toLowerCase() === 'admin';
+            tr.innerHTML = `
+                <td><strong><i class="fa-solid fa-user" style="color: var(--accent-cyan);"></i> ${u.username}</strong></td>
+                <td>${u.name || u.username}</td>
+                <td><span class="card-badge ${u.role === 'admin' ? 'badge-amber' : ''}">${u.role === 'admin' ? 'Administrator' : 'Foydalanuvchi'}</span></td>
+                <td>
+                    ${isMasterAdmin ? '<span style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-lock"></i> Asosiy</span>' : `<button class="btn btn-sm btn-rose delete-user-btn" data-username="${u.username}"><i class="fa-solid fa-trash"></i></button>`}
+                </td>
+            `;
+            usersTableBody.appendChild(tr);
+        });
+
+        document.querySelectorAll('.delete-user-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const targetUsername = e.currentTarget.getAttribute('data-username');
+                if (confirm(`Haqiqatan ham '${targetUsername}' foydalanuvchisini o'chirmoqchimisiz?`)) {
+                    fetch(getApiUrl('/api/users/' + encodeURIComponent(targetUsername)), { method: 'DELETE', headers: authHeaders() })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            showToast('success', "O'chirildi", data.message);
+                            fetchUsers();
+                        } else {
+                            showToast('error', 'Xatolik', data.error);
+                        }
+                    });
+                }
+            });
+        });
+    }
+
+    if (addUserForm) {
+        addUserForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const username = newUsernameInput.value.trim();
+            const password = newPasswordInput.value.trim();
+            const name = newNameInput.value.trim();
+            const role = newRoleSelect.value;
+
+            if (!username || !password) return;
+
+            fetch(getApiUrl('/api/users'), {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ username, password, name, role })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('success', "Qo'shildi", data.message);
+                    addUserForm.reset();
+                    fetchUsers();
+                } else {
+                    showToast('error', 'Xatolik', data.error);
+                }
+            })
+            .catch(err => showToast('error', 'Xatolik', err.message));
+        });
+    }
+
+    // Password Visibility Toggle Logic
+    document.addEventListener('click', (e) => {
+        const toggleBtn = e.target.closest('.toggle-password-btn');
+        if (!toggleBtn) return;
+        const wrapper = toggleBtn.closest('.password-input-wrapper') || toggleBtn.parentElement;
+        if (!wrapper) return;
+        const input = wrapper.querySelector('input');
+        if (!input) return;
+        const icon = toggleBtn.querySelector('i');
+        if (input.type === 'password') {
+            input.type = 'text';
+            if (icon) {
+                icon.className = 'fa-solid fa-eye-slash';
+                icon.style.color = 'var(--accent-cyan)';
+            }
+        } else {
+            input.type = 'password';
+            if (icon) {
+                icon.className = 'fa-solid fa-eye';
+                icon.style.color = '';
+            }
+        }
+    });
+
+    // ==========================================
+    // MANUAL STATION SALES OVERRIDE LOGIC
+    // ==========================================
+    const overrideForm = document.getElementById('overrideForm');
+    const overrideYmSelect = document.getElementById('overrideYmSelect');
+    const overrideEmailSelect = document.getElementById('overrideEmailSelect');
+    const overrideTicketsInput = document.getElementById('overrideTicketsInput');
+    const overrideSummaInput = document.getElementById('overrideSummaInput');
+    const overridesTableBody = document.getElementById('overridesTableBody');
+
+    function populateOverrideDropdowns(stats) {
+        if (overrideYmSelect) {
+            overrideYmSelect.innerHTML = '';
+            const availableMonths = stats ? (stats.available_months || []) : [];
+            availableMonths.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.code;
+                opt.textContent = m.name;
+                overrideYmSelect.appendChild(opt);
+            });
+        }
+
+        if (overrideEmailSelect && currentMappings) {
+            overrideEmailSelect.innerHTML = '';
+            Object.entries(currentMappings).forEach(([email, meta]) => {
+                const opt = document.createElement('option');
+                opt.value = email;
+                opt.textContent = `${meta.station || email} (${email})`;
+                overrideEmailSelect.appendChild(opt);
+            });
+        }
+    }
+
+    function fetchOverrides() {
+        if (!overridesTableBody) return;
+        fetch(getApiUrl('/api/admin/overrides'), {
+            headers: authHeaders()
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success && data.overrides) {
+                renderOverridesTable(data.overrides);
+            }
+        })
+        .catch(err => console.log('fetchOverrides error:', err));
+    }
+
+    function renderOverridesTable(overrides) {
+        if (!overridesTableBody) return;
+        overridesTableBody.innerHTML = '';
+        if (overrides.length === 0) {
+            overridesTableBody.innerHTML = '<tr><td colspan="6" class="empty-row">Qo\'lda kiritilgan tahrirlar yo\'q</td></tr>';
+            return;
+        }
+
+        overrides.forEach(ov => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><strong>${ov.ym}</strong></td>
+                <td>${ov.station_name || ov.email}</td>
+                <td><span class="number-cell-tickets">${ov.override_tickets !== null && ov.override_tickets !== undefined ? ov.override_tickets.toLocaleString('uz-UZ') + ' ta' : 'Asl'}</span></td>
+                <td><span class="number-cell-summa">${ov.override_summa !== null && ov.override_summa !== undefined ? ov.override_summa.toLocaleString('uz-UZ') + " so'm" : 'Asl'}</span></td>
+                <td style="font-size: 12px; opacity: 0.8;">${ov.updated_at || '-'}</td>
+                <td>
+                    <button class="btn-icon-only btn-sm" style="color: var(--accent-rose);" onclick="deleteOverride('${ov.ym}', '${ov.email}')" title="Tahrirni bekor qilish">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                </td>
+            `;
+            overridesTableBody.appendChild(tr);
+        });
+    }
+
+    window.deleteOverride = function(ym, email) {
+        if (!confirm(`${ym} oyi uchun ushbu kassa tahririni bekor qilmoqchimisiz?`)) return;
+        fetch(getApiUrl('/api/admin/overrides'), {
+            method: 'DELETE',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ ym, email })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast('success', 'Bekor qilindi', data.message);
+                fetchOverrides();
+                if (data.stats) renderDashboard(data.stats);
+            } else {
+                showToast('error', 'Xatolik', data.error);
+            }
+        })
+        .catch(err => showToast('error', 'Xatolik', err.message));
+    };
+
+    if (overrideForm) {
+        overrideForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const ym = overrideYmSelect ? overrideYmSelect.value : '';
+            const email = overrideEmailSelect ? overrideEmailSelect.value : '';
+            const tickets = overrideTicketsInput ? overrideTicketsInput.value : '';
+            const summa = overrideSummaInput ? overrideSummaInput.value : '';
+
+            if (!ym || !email || !tickets) {
+                showToast('warning', 'Ogohlantirish', "Hisobot oyi, kassa hamda chiptalar sonini kiriting!");
+                return;
+            }
+
+            fetch(getApiUrl('/api/admin/override-station'), {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ ym, email, tickets, summa })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('success', 'Muvaffaqiyatli Saqlandi!', data.message);
+                    if (overrideTicketsInput) overrideTicketsInput.value = '';
+                    if (overrideSummaInput) overrideSummaInput.value = '';
+                    fetchOverrides();
+                    if (data.stats) renderDashboard(data.stats);
+                } else {
+                    showToast('error', 'Xatolik', data.error);
+                }
+            })
+            .catch(err => showToast('error', 'Xatolik', err.message));
+        });
+    }
+
+    // ==========================================
+    // USER MANAGEMENT LOGIC
+    // ==========================================
+    function fetchUsers() {
+        const usersTableBody = document.getElementById('usersTableBody');
+        if (!usersTableBody) return;
+        fetch(getApiUrl('/api/users'), { headers: authHeaders() })
+            .then(res => {
+                if (res.status === 401) return handleUnauthorizedAccess();
+                return res.json();
+            })
+            .then(data => {
+                if (data && data.success && data.users) {
+                    usersTableBody.innerHTML = data.users.map(u => `
+                        <tr>
+                            <td><strong>${u.username}</strong></td>
+                            <td>${u.name || '-'}</td>
+                            <td>
+                                <span class="badge ${u.role === 'admin' ? 'badge-amber' : 'badge-cyan'}" style="padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700;">
+                                    ${u.role === 'admin' ? 'Administrator' : 'Foydalanuvchi'}
+                                </span>
+                            </td>
+                            <td>
+                                ${u.username !== 'admin' ? `<button class="btn-icon-only btn-sm" style="color:var(--accent-rose); padding: 2px 6px;" title="O'chirish" onclick="deleteUserAccount('${u.username}')"><i class="fa-solid fa-trash"></i></button>` : '<span style="font-size:11px; color:var(--text-secondary);">(Bosh Admin)</span>'}
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+            })
+            .catch(err => console.error("fetchUsers error:", err));
+    }
+
+    const addUserForm = document.getElementById('addUserForm');
+    if (addUserForm) {
+        addUserForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const usernameInput = document.getElementById('newUsernameInput');
+            const passwordInput = document.getElementById('newPasswordInput');
+            const nameInput = document.getElementById('newNameInput');
+            const roleSelect = document.getElementById('newRoleSelect');
+
+            const username = usernameInput ? usernameInput.value.trim() : '';
+            const password = passwordInput ? passwordInput.value.trim() : '';
+            const name = nameInput ? nameInput.value.trim() : '';
+            const role = roleSelect ? roleSelect.value : 'user';
+
+            if (!username || !password) {
+                showToast('warning', 'Ogohlantirish', 'Login va parol kiritilishi shart!');
+                return;
+            }
+
+            fetch(getApiUrl('/api/users'), {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ username, password, name, role })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('success', 'Foydalanuvchi Qo\'shildi', data.message);
+                    addUserForm.reset();
+                    fetchUsers();
+                } else {
+                    showToast('error', 'Xatolik', data.error || 'Qo\'shishda xatolik yuz berdi');
+                }
+            })
+            .catch(err => showToast('error', 'Xatolik', err.message));
+        });
+    }
+
+    window.deleteUserAccount = function(username) {
+        if (!confirm(`Haqiqatan ham '${username}' foydalanuvchisini o'chirmoqchimisiz?`)) return;
+        fetch(getApiUrl(`/api/users/${username}`), {
+            method: 'DELETE',
+            headers: authHeaders()
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast('success', 'O\'chirildi', data.message);
+                fetchUsers();
+            } else {
+                showToast('error', 'Xatolik', data.error);
+            }
+        })
+        .catch(err => showToast('error', 'Xatolik', err.message));
+    };
+
+    // Perform mandatory authentication check on startup
+    checkAppAuthentication();
 
     // Drag & Drop Handling
     if (dropzone) {
@@ -602,14 +1230,19 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const formData = new FormData();
-        formData.append('file', file);
-
         if (dropzoneContent) dropzoneContent.style.display = 'none';
         if (uploadSpinner) uploadSpinner.style.display = 'flex';
 
-        fetch('/api/upload', {
+        fallbackFormDataUpload(file);
+    }
+
+    function fallbackFormDataUpload(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        fetch(getApiUrl('/api/upload'), {
             method: 'POST',
+            headers: authHeaders(),
             body: formData
         })
         .then(res => res.json())
@@ -617,12 +1250,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (uploadSpinner) uploadSpinner.style.display = 'none';
             if (dropzoneContent) dropzoneContent.style.display = 'block';
 
-            if (data.success) {
+            if (data.status === 'success' || data.success) {
                 renderDashboard(data.stats);
                 fetchUploadLogs();
-                showToast('success', 'Muvaffaqiyatli', 'Hisobot muvaffaqiyatli shakllantirildi va ma\'lumotlar yangilandi!');
+                showToast('success', 'Muvaffaqiyatli', data.message || 'Hisobot muvaffaqiyatli shakllantirildi!');
             } else {
-                showToast('error', 'Yuklashda Xatolik', data.error || 'Noma\'lum xatolik');
+                showToast('error', 'Yuklashda Xatolik', data.message || data.error || 'Noma\'lum xatolik');
             }
         })
         .catch(err => {
@@ -634,21 +1267,29 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function fetchStats() {
-        fetch('/api/stats')
-            .then(res => res.json())
+        fetch(getApiUrl('/api/stats'), { headers: authHeaders() })
+            .then(res => {
+                if (res.status === 401) {
+                    handleUnauthorizedAccess("Avtorizatsiya muddati tugadi. Qaytadan kirishingiz so'raladi.");
+                    throw new Error("401 Unauthorized");
+                }
+                return res.json();
+            })
             .then(data => {
                 if (data.success) {
                     if (data.monthly_reports) {
                         monthlyReportsData = data.monthly_reports;
                     }
                     renderDashboard(data.stats);
+                } else if (data.error) {
+                    showToast('error', 'Xatolik', data.error);
                 }
             })
-            .catch(err => console.error(err));
+            .catch(err => console.error("fetchStats error:", err));
     }
 
     function fetchMappings() {
-        fetch('/api/mappings')
+        fetch(getApiUrl('/api/mappings'))
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
@@ -659,7 +1300,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function fetchUploadLogs() {
-        fetch('/api/upload-logs')
+        fetch(getApiUrl('/api/upload-logs'))
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
@@ -687,9 +1328,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        fetch('/api/mappings', {
+        fetch(getApiUrl('/api/mappings'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(newMap)
         })
         .then(res => res.json())
@@ -708,7 +1349,6 @@ document.addEventListener('DOMContentLoaded', () => {
         fullBackendStats = stats;
         populatePeriodDropdowns(stats);
         applyPeriodFilter();
-        renderDirectorDashboard(stats);
     }
 
     function populatePeriodDropdowns(stats) {
@@ -717,6 +1357,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (periodSelect) {
             periodSelect.innerHTML = '';
             
+            // 1. Year To Date (YTD) - Default & Primary Option
+            const ytdYear = (stats.ytd_data && stats.ytd_data.year) ? stats.ytd_data.year : '2026';
+            const optYtd = document.createElement('option');
+            optYtd.value = 'ytd';
+            optYtd.textContent = `Shu Yil Boshidan Beri (${ytdYear} YTD)`;
+            periodSelect.appendChild(optYtd);
+
+            // 2. All Months Combined (Total)
+            const optAll = document.createElement('option');
+            optAll.value = 'all';
+            optAll.textContent = "Barcha Oylar Birgalikda (Jami Yillik)";
+            periodSelect.appendChild(optAll);
+
+            // 3. Latest Month
             if (availableMonths.length > 0) {
                 const optLatest = document.createElement('option');
                 optLatest.value = 'latest';
@@ -724,11 +1378,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 periodSelect.appendChild(optLatest);
             }
 
-            const optAll = document.createElement('option');
-            optAll.value = 'all';
-            optAll.textContent = "Barcha Oylar Birgalikda";
-            periodSelect.appendChild(optAll);
-
+            // 4. Individual Months
             availableMonths.forEach(m => {
                 const opt = document.createElement('option');
                 opt.value = m.code;
@@ -736,7 +1386,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 periodSelect.appendChild(opt);
             });
 
-            periodSelect.value = currentSelectedPeriod;
+            periodSelect.value = currentSelectedPeriod || 'ytd';
         }
 
         // Comparison Selectors
@@ -766,75 +1416,107 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function applyPeriodFilter() {
-        if (!fullBackendStats) return;
+    function computeExecutiveSummary(statsObj, periodTitle) {
+        if (!statsObj) return {};
+        const tSum = statsObj.total_summa || 0;
+        const tTix = statsObj.total_tickets || 0;
+        const avgP = tTix > 0 ? Math.round(tSum / tTix) : 0;
 
-        if (currentSelectedPeriod === 'all' && fullBackendStats.overall_data) {
-            currentStats = fullBackendStats.overall_data;
-        } else if (currentSelectedPeriod !== 'latest' && fullBackendStats.monthly_data && fullBackendStats.monthly_data[currentSelectedPeriod]) {
-            currentStats = fullBackendStats.monthly_data[currentSelectedPeriod];
-        } else {
-            // Default latest / initial stats
-            currentStats = {
-                total_tickets: fullBackendStats.total_tickets,
-                total_summa: fullBackendStats.total_summa,
-                stations: fullBackendStats.stations,
-                daily_trend: fullBackendStats.daily_trend
-            };
+        const dTrend = statsObj.daily_trend || [];
+        const dLen = dTrend.length;
+        const dAvgS = dLen > 0 ? Math.round(tSum / dLen) : 0;
+
+        let peakDay = { date: '-', summa: 0, tickets: 0 };
+        if (dTrend.length > 0) {
+            peakDay = dTrend.reduce((max, d) => ((d.summa || 0) > (max.summa || 0) ? d : max), dTrend[0]);
         }
 
-        renderActiveViews();
-        renderComparisonView();
-    }
+        const stations = statsObj.stations || [];
+        const topSt = stations.length > 0 ? stations[0] : { stansiya: 'Noma\'lum', summa_val: 0, share_percent: 0 };
+        const secSt = stations.length > 1 ? stations[1] : { stansiya: '-', summa_val: 0, share_percent: 0 };
 
-    function renderActiveViews() {
-        if (!currentStats) return;
-
-        // KPI values
-        if (kpiTickets) kpiTickets.textContent = currentStats.total_tickets.toLocaleString('uz-UZ') + ' ta';
-        if (kpiSumma) kpiSumma.textContent = currentStats.total_summa.toLocaleString('uz-UZ') + ' so\'m';
-        
-        if (currentStats.stations && currentStats.stations.length > 0) {
-            const topSt = [...currentStats.stations].sort((a, b) => b.summa_val - a.summa_val)[0];
-            if (kpiTopStation) kpiTopStation.textContent = topSt.stansiya;
-            if (kpiTopStationVal) kpiTopStationVal.textContent = `${topSt.soni_val.toLocaleString()} chipta (${(topSt.summa_val / 1000000).toFixed(1)} mln so'm)`;
-        }
-
-        // Payment ratio
         let onlineSum = 0;
         let terminalSum = 0;
-        (currentStats.daily_trend || []).forEach(item => {
+        dTrend.forEach(item => {
             onlineSum += item.online_tickets || 0;
             terminalSum += item.terminal_tickets || 0;
         });
         const grandPayTickets = onlineSum + terminalSum || 1;
-        const onlinePct = ((onlineSum / grandPayTickets) * 100).toFixed(1);
-        const terminalPct = ((terminalSum / grandPayTickets) * 100).toFixed(1);
+        const onlinePct = parseFloat(((onlineSum / grandPayTickets) * 100).toFixed(1));
+        const terminalPct = parseFloat((100 - onlinePct).toFixed(1));
 
-        if (kpiRatio) kpiRatio.textContent = `${onlinePct}% / ${terminalPct}%`;
-        if (kpiRatioSub) kpiRatioSub.textContent = `Online: ${onlineSum.toLocaleString()} | Terminal: ${terminalSum.toLocaleString()}`;
+        return {
+            net_revenue: tSum,
+            total_tickets: tTix,
+            overall_avg_price: avgP,
+            daily_avg_revenue: dAvgS,
+            daily_avg_tickets: dLen > 0 ? Math.round(tTix / dLen) : 0,
+            peak_date: peakDay.date || '-',
+            peak_day_revenue: peakDay.summa || 0,
+            top_station: topSt.stansiya,
+            top_station_summa: topSt.summa_val || 0,
+            top_station_share: topSt.share_percent || 0,
+            second_station: secSt.stansiya,
+            second_station_summa: secSt.summa_val || 0,
+            online_percent: onlinePct,
+            terminal_percent: terminalPct,
+            period_name: periodTitle,
+            ai_recommendation: `Hurmatli Rahbariyat, <strong>${periodTitle}</strong> bo'yicha kiosklar orqali jami <strong>${tSum.toLocaleString('uz-UZ')} so'm</strong> tushum hamda <strong>${tTix.toLocaleString('uz-UZ')} ta</strong> chipta sotildi. Bitta chiptaning o'rtacha narxi <strong>${avgP.toLocaleString('uz-UZ')} so'mni</strong> va kunlik o'rtacha tushum <strong>${dAvgS.toLocaleString('uz-UZ')} so'mni</strong> tashkil etdi. Eng savdoli kassa <strong>${topSt.stansiya}</strong> bo'lib, uning umumiy tushumdagi ulushi <strong>${topSt.share_percent}%</strong> ni tashkil qiladi. Eng yuqori kunlik savdo ko'rsatkichi <strong>${peakDay.date}</strong> sanasida (<strong>${(peakDay.summa || 0).toLocaleString('uz-UZ')} so'm</strong>) qayd etilgan.`
+        };
+    }
 
-        // Render Views
+    function applyPeriodFilter() {
+        if (!fullBackendStats) return;
+
+        let periodTitle = "Tanlangan Davr";
+
+        if (currentSelectedPeriod === 'ytd') {
+            currentStats = fullBackendStats.ytd_data || fullBackendStats.overall_data;
+            periodTitle = `${fullBackendStats.ytd_data?.year || '2026'}-yil boshidan beri (YTD)`;
+        } else if (currentSelectedPeriod === 'all' && fullBackendStats.overall_data) {
+            currentStats = fullBackendStats.overall_data;
+            periodTitle = "Barcha Oylar Birgalikda (Jami Yillik)";
+        } else if (currentSelectedPeriod === 'latest' && fullBackendStats.available_months && fullBackendStats.available_months.length > 0) {
+            const latestCode = fullBackendStats.available_months[0].code;
+            currentStats = fullBackendStats.monthly_data ? (fullBackendStats.monthly_data[latestCode] || fullBackendStats) : fullBackendStats;
+            periodTitle = `${fullBackendStats.available_months[0].name} oyi`;
+        } else if (fullBackendStats.monthly_data && fullBackendStats.monthly_data[currentSelectedPeriod]) {
+            currentStats = fullBackendStats.monthly_data[currentSelectedPeriod];
+            const mMatch = (fullBackendStats.available_months || []).find(m => m.code === currentSelectedPeriod);
+            periodTitle = mMatch ? `${mMatch.name} oyi` : currentSelectedPeriod;
+        } else {
+            currentStats = fullBackendStats;
+            periodTitle = "Hisobot Davri";
+        }
+
+        if (currentStats && (!currentStats.director_summary || !currentStats.director_summary.period_name)) {
+            currentStats.director_summary = computeExecutiveSummary(currentStats, periodTitle);
+        }
+
+        const periodBadges = document.querySelectorAll('.active-period-badge-label');
+        periodBadges.forEach(el => { el.textContent = periodTitle; });
+
         const sortedStations = getSortedStations();
-        renderTable(sortedStations, currentStats.total_summa);
+        renderDirectorDashboard(currentStats, sortedStations);
         renderStationCards(sortedStations, currentStats.total_summa);
         renderDailyTable(currentStats.daily_trend || []);
-        renderRevenueChart(sortedStations);
         renderTrendChart(currentStats.daily_trend || []);
+        renderComparisonView();
     }
 
     /* RAHBARIYAT DASHBOARD RENDERER (PURE BUSINESS METRICS) */
-    function renderDirectorDashboard(stats) {
+    function renderDirectorDashboard(stats, sortedStations) {
         if (!stats) return;
         const summary = stats.director_summary || {};
-        const stations = stats.stations || [];
+        const stations = sortedStations || getSortedStations(stats);
 
         // Real Executive KPIs
-        if (dirKpiNetRevenue) dirKpiNetRevenue.textContent = `${(summary.net_revenue || stats.total_summa || 0).toLocaleString('uz-UZ')} so'm`;
+        if (dirKpiNetRevenue) dirKpiNetRevenue.textContent = formatCurrency(summary.net_revenue || stats.total_summa || 0);
         if (dirKpiTotalTickets) dirKpiTotalTickets.textContent = `${(summary.total_tickets || stats.total_tickets || 0).toLocaleString('uz-UZ')} ta`;
 
-        // Card 3: Eng Yuqori Savdoli Kassa
-        const topSt = (stations && stations.length > 0) ? stations[0] : null;
+        // Card 3: Eng Yuqori Savdoli Kassa (har doim summa bo'yicha, sort rejimidan qat'i nazar)
+        const revenueSorted = [...(stats.stations || [])].sort((a, b) => b.summa_val - a.summa_val);
+        const topSt = revenueSorted.length > 0 ? revenueSorted[0] : null;
         if (dirKpiTopStationName) dirKpiTopStationName.textContent = topSt ? topSt.stansiya : (summary.top_station || '-');
         if (dirKpiTopStationShare) {
             const shPct = topSt ? topSt.share_percent : (summary.top_station_share || 0);
@@ -842,7 +1524,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (dirKpiTopStationSum) {
             const sumVal = topSt ? topSt.summa_val : (summary.top_station_summa || 0);
-            dirKpiTopStationSum.textContent = `${sumVal.toLocaleString('uz-UZ')} so'm`;
+            dirKpiTopStationSum.textContent = formatCurrency(sumVal);
         }
 
         // Card 4: To'lov Turlari Nisbati (Online / Terminal)
@@ -975,11 +1657,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const textColor = isLight ? '#475569' : '#94a3b8';
         const gridColor = isLight ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.05)';
 
-        // Sort descending by revenue for horizontal chart
-        const sorted = [...stations].sort((a, b) => b.summa_val - a.summa_val);
-
-        const labels = sorted.map((s, i) => `${i + 1}. ${s.stansiya}`);
-        const data = sorted.map(s => s.summa_val);
+        // stations kelayotganda allaqachon joriy sort rejimi bo'yicha tartiblangan
+        const labels = stations.map((s, i) => `${i + 1}. ${s.stansiya}`);
+        const data = currentSortMode === 'soni' ? stations.map(s => s.soni_val) : stations.map(s => s.summa_val);
+        const labelText = currentSortMode === 'soni' ? 'Sotilgan Chiptalar Soni' : 'Tushum Summasi (So\'m)';
 
         const chartCtx = ctx.getContext('2d');
         const gradient = chartCtx.createLinearGradient(0, 0, 400, 0);
@@ -991,7 +1672,7 @@ document.addEventListener('DOMContentLoaded', () => {
             data: {
                 labels: labels,
                 datasets: [{
-                    label: 'Tushum Summasi (So\'m)',
+                    label: labelText,
                     data: data,
                     backgroundColor: gradient,
                     borderColor: '#38bdf8',
@@ -1015,7 +1696,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         padding: 12,
                         callbacks: {
                             label: function(context) {
-                                return ` Tushum: ${context.raw.toLocaleString('uz-UZ')} so'm (${(context.raw / 1000000).toFixed(1)} mln)`;
+                                if (currentSortMode === 'soni') {
+                                    return ` Chiptalar: ${context.raw.toLocaleString('uz-UZ')} ta`;
+                                }
+                                return ` Tushum: ${context.raw.toLocaleString('uz-UZ')} so'm (${formatMln(context.raw)})`;
                             }
                         }
                     }
@@ -1025,7 +1709,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         ticks: {
                             color: textColor,
                             font: { family: 'Plus Jakarta Sans', size: 11 },
-                            callback: function(val) { return (val / 1000000).toFixed(0) + ' M'; }
+                            callback: function(val) {
+                                if (currentSortMode === 'soni') return val;
+                                return (val / 1000000).toFixed(0) + ' M';
+                            }
                         },
                         grid: { color: gridColor }
                     },
@@ -1088,7 +1775,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     tooltip: {
                         callbacks: {
                             label: function(context) {
-                                return ` ${context.label}: ${(context.raw / 1000000).toFixed(1)} mln so'm`;
+                                return ` ${context.label}: ${formatMln(context.raw)} so'm`;
                             }
                         }
                     }
@@ -1103,26 +1790,14 @@ document.addEventListener('DOMContentLoaded', () => {
         mappingEditorGrid.innerHTML = '';
 
         for (const [email, meta] of Object.entries(mappings)) {
-            const card = document.createElement('div');
-            card.className = 'target-card';
-            card.innerHTML = `
-                <h4><i class="fa-solid fa-envelope" style="color: var(--accent-violet)"></i> ${email}</h4>
-                <div class="target-inputs-row" style="grid-template-columns: 1.5fr 1fr 1fr; margin-top: 10px;">
-                    <div class="input-group">
-                        <label>Stansiya Nomi</label>
-                        <input type="text" class="input-control" data-email="${email}" data-field="station" value="${meta.station}">
-                    </div>
-                    <div class="input-group">
-                        <label>Soni Ustuni</label>
-                        <input type="number" class="input-control" data-email="${email}" data-field="col_soni" value="${meta.col_soni}">
-                    </div>
-                    <div class="input-group">
-                        <label>Summa Ustuni</label>
-                        <input type="number" class="input-control" data-email="${email}" data-field="col_summa" value="${meta.col_summa}">
-                    </div>
-                </div>
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><i class="fa-solid fa-envelope" style="color: var(--accent-violet); margin-right: 6px;"></i>${email}</td>
+                <td><input type="text" class="input-control" data-email="${email}" data-field="station" value="${meta.station}"></td>
+                <td><input type="number" class="input-control" data-email="${email}" data-field="col_soni" value="${meta.col_soni}"></td>
+                <td><input type="number" class="input-control" data-email="${email}" data-field="col_summa" value="${meta.col_summa}"></td>
             `;
-            mappingEditorGrid.appendChild(card);
+            mappingEditorGrid.appendChild(tr);
         }
     }
 
@@ -1145,32 +1820,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td><span class="status-badge" style="display: inline-flex;"><i class="fa-solid fa-check"></i> ${log.status}</span></td>
             `;
             uploadLogsTableBody.appendChild(tr);
-        });
-    }
-
-    function renderTable(stations, totalSumma) {
-        if (!tableBody) return;
-        tableBody.innerHTML = '';
-        if (!stations || stations.length === 0) {
-            tableBody.innerHTML = '<tr><td colspan="5" class="empty-row">Ma&#39;lumot topilmadi</td></tr>';
-            return;
-        }
-
-        stations.forEach((item, idx) => {
-            const tr = document.createElement('tr');
-            tr.className = 'clickable-station-row';
-            tr.title = `${item.stansiya} kassa ma'lumotlarini ochish uchun bosing`;
-            tr.onclick = () => openStationDetailsModal(item.stansiya);
-            const pct = totalSumma > 0 ? ((item.summa_val / totalSumma) * 100).toFixed(1) : 0;
-
-            tr.innerHTML = `
-                <td><strong>${idx + 1}</strong></td>
-                <td><i class="fa-solid fa-location-dot" style="color: var(--accent-cyan); margin-right: 6px;"></i> <strong>${item.stansiya}</strong></td>
-                <td><strong>${item.soni_val.toLocaleString('uz-UZ')} ta</strong></td>
-                <td><strong style="color: var(--accent-emerald);">${item.summa_val.toLocaleString('uz-UZ')} so'm</strong></td>
-                <td><span class="badge-percent">${pct}%</span></td>
-            `;
-            tableBody.appendChild(tr);
         });
     }
 
@@ -1197,7 +1846,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div class="st-metric-item">
                         <span class="st-metric-label">Tushum Summasi</span>
-                        <span class="st-metric-value" style="color: var(--accent-emerald);">${(item.summa_val / 1000000).toFixed(1)} mln so'm</span>
+                        <span class="st-metric-value" style="color: var(--accent-emerald);">${formatMln(item.summa_val)} so'm</span>
                     </div>
                 </div>
                 <div class="progress-bar-bg" style="margin-top: 12px;">
@@ -1213,18 +1862,27 @@ document.addEventListener('DOMContentLoaded', () => {
         dailyTableBody.innerHTML = '';
 
         if (!dailyTrend || dailyTrend.length === 0) {
-            dailyTableBody.innerHTML = '<tr><td colspan="6" class="empty-row">Kunlik ma&#39;lumot topilmadi</td></tr>';
+            dailyTableBody.innerHTML = '<tr><td colspan="5" class="empty-row">Kunlik ma&#39;lumot topilmadi</td></tr>';
             return;
         }
 
         dailyTrend.forEach(item => {
             const tr = document.createElement('tr');
+            const payTotal = (item.online_tickets || 0) + (item.terminal_tickets || 0) || 1;
+            const onlinePct = ((item.online_tickets || 0) / payTotal * 100).toFixed(1);
+            const terminalPct = (100 - onlinePct).toFixed(1);
             tr.innerHTML = `
                 <td><strong>${item.date}</strong></td>
                 <td><strong>${item.tickets.toLocaleString('uz-UZ')} ta</strong></td>
                 <td><strong style="color: var(--accent-emerald);">${item.summa.toLocaleString('uz-UZ')} so'm</strong></td>
-                <td><span style="color: var(--accent-cyan); font-weight: 600;">${item.online_tickets.toLocaleString()} (${(item.online_summa / 1000000).toFixed(1)}M)</span></td>
-                <td><span style="color: var(--accent-violet); font-weight: 600;">${item.terminal_tickets.toLocaleString()} (${(item.terminal_summa / 1000000).toFixed(1)}M)</span></td>
+                <td>
+                    <div class="payment-type-cell" title="Online: ${item.online_tickets.toLocaleString()} ta (${(item.online_summa / 1000000).toFixed(1)}M so'm) | Terminal: ${item.terminal_tickets.toLocaleString()} ta (${(item.terminal_summa / 1000000).toFixed(1)}M so'm)">
+                        <div class="payment-type-track">
+                            <div class="payment-type-fill online" style="width: ${onlinePct}%;"></div>
+                        </div>
+                        <span class="payment-type-label"><i class="fa-solid fa-globe" style="color: var(--accent-cyan);"></i> ${onlinePct}% / <i class="fa-solid fa-credit-card" style="color: var(--accent-violet);"></i> ${terminalPct}%</span>
+                    </div>
+                </td>
                 <td><span class="status-badge"><i class="fa-solid fa-check"></i> Aniq</span></td>
             `;
             dailyTableBody.appendChild(tr);
@@ -1245,7 +1903,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const revDiff = targetData.total_summa - baseData.total_summa;
         const revPct = baseData.total_summa > 0 ? ((revDiff / baseData.total_summa) * 100).toFixed(1) : 0;
 
-        if (momRevGrowth) momRevGrowth.textContent = `${revDiff >= 0 ? '+' : ''}${revDiff.toLocaleString('uz-UZ')} so'm`;
+        if (momRevGrowth) momRevGrowth.textContent = `${revDiff >= 0 ? '+' : ''}${formatCurrency(revDiff)}`;
         if (momRevBadge) {
             momRevBadge.className = revDiff >= 0 ? 'kpi-badge positive' : 'kpi-badge negative';
             momRevBadge.innerHTML = `<i class="fa-solid fa-arrow-trend-${revDiff >= 0 ? 'up' : 'down'}"></i> ${revPct}%`;
@@ -1404,90 +2062,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    /* HORIZONTAL REVENUE CHART IN OVERVIEW TAB */
-    function renderRevenueChart(stations) {
-        const ctx = document.getElementById('revenueChart');
-        if (!ctx) return;
-
-        if (revenueChartInstance) {
-            revenueChartInstance.destroy();
-        }
-
-        const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-        const textColor = isLight ? '#475569' : '#94a3b8';
-        const gridColor = isLight ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.05)';
-
-        const chartCtx = ctx.getContext('2d');
-        const gradient = chartCtx.createLinearGradient(0, 0, 400, 0);
-        gradient.addColorStop(0, 'rgba(56, 189, 248, 0.9)');
-        gradient.addColorStop(1, 'rgba(59, 130, 246, 0.7)');
-
-        const sorted = [...stations].sort((a, b) => b.summa_val - a.summa_val);
-        const labels = sorted.map((s, i) => `${i + 1}. ${s.stansiya}`);
-        const data = currentSortMode === 'soni' ? sorted.map(s => s.soni_val) : sorted.map(s => s.summa_val);
-        const labelText = currentSortMode === 'soni' ? 'Sotilgan Chiptalar Soni' : 'Tushgan Summa (so\'m)';
-
-        revenueChartInstance = new Chart(chartCtx, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: labelText,
-                    data: data,
-                    backgroundColor: gradient,
-                    borderColor: '#38bdf8',
-                    borderWidth: 1,
-                    borderRadius: 6,
-                    barThickness: 16
-                }]
-            },
-            options: {
-                indexAxis: 'y', // HORIZONTAL BAR CHART
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        backgroundColor: isLight ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 23, 42, 0.95)',
-                        titleColor: isLight ? '#0f172a' : '#f8fafc',
-                        bodyColor: isLight ? '#334155' : '#e2e8f0',
-                        borderColor: isLight ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)',
-                        borderWidth: 1,
-                        padding: 12,
-                        callbacks: {
-                            label: function(context) {
-                                if (currentSortMode === 'soni') {
-                                    return ' Chiptalar: ' + context.raw.toLocaleString('uz-UZ') + ' ta';
-                                }
-                                return ' Tushum: ' + context.raw.toLocaleString('uz-UZ') + ' so\'m';
-                            }
-                        }
-                    }
-                },
-                scales: {
-                    x: {
-                        ticks: {
-                            color: textColor,
-                            font: { family: 'Plus Jakarta Sans', size: 11 },
-                            callback: function(val) {
-                                if (currentSortMode === 'soni') return val;
-                                return (val / 1000000).toFixed(0) + ' M';
-                            }
-                        },
-                        grid: { color: gridColor }
-                    },
-                    y: {
-                        ticks: {
-                            color: textColor,
-                            font: { family: 'Plus Jakarta Sans', size: 12, weight: '600' }
-                        },
-                        grid: { display: false }
-                    }
-                }
-            }
-        });
-    }
-
     function renderTrendChart(dailyTrend) {
         const ctx = document.getElementById('trendChart');
         if (!ctx) return;
@@ -1560,252 +2134,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-
-    /* --- BEARER TOKEN & API AUTO SYNC MANAGEMENT --- */
-    const bearerTokenInput = document.getElementById('bearerTokenInput');
-    const csrfTokenInput = document.getElementById('csrfTokenInput');
-    const saveTokenBtn = document.getElementById('saveTokenBtn');
-    const checkTokenHealthBtn = document.getElementById('checkTokenHealthBtn');
-    const tokenStatusDot = document.getElementById('tokenStatusDot');
-    const tokenStatusText = document.getElementById('tokenStatusText');
-
-    const apiStartDate = document.getElementById('apiStartDate');
-    const apiEndDate = document.getElementById('apiEndDate');
-    const fetchApiDataBtn = document.getElementById('fetchApiDataBtn');
-    const apiSyncProgress = document.getElementById('apiSyncProgress');
-    const apiSyncProgressText = document.getElementById('apiSyncProgressText');
-    const apiSyncStatusAlert = document.getElementById('apiSyncStatusAlert');
-
-    // Default dates setup (Current Month start and today/end of month)
-    if (apiStartDate && apiEndDate) {
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        
-        apiStartDate.value = `${year}-${month}-01`;
-        
-        const lastDayOfMonth = new Date(year, now.getMonth() + 1, 0).getDate();
-        const endDayStr = String(lastDayOfMonth).padStart(2, '0');
-        apiEndDate.value = `${year}-${month}-${endDayStr}`;
-    }
-
-    function updateTokenHealthUI(health) {
-        const headerTokenDot = document.getElementById('headerTokenDot');
-        const headerTokenText = document.getElementById('headerTokenText');
-
-        if (tokenStatusDot) tokenStatusDot.className = 'status-dot-indicator';
-        if (headerTokenDot) headerTokenDot.className = 'status-dot-indicator';
-
-        if (!health) {
-            if (tokenStatusDot) tokenStatusDot.classList.add('red');
-            if (headerTokenDot) headerTokenDot.classList.add('red');
-            if (tokenStatusText) {
-                tokenStatusText.style.color = 'var(--accent-rose)';
-                tokenStatusText.textContent = 'Token kiritilmagan';
-            }
-            if (headerTokenText) {
-                headerTokenText.style.color = 'var(--accent-rose)';
-                headerTokenText.textContent = 'Token kiritilmagan';
-            }
-            return;
-        }
-
-        if (health.valid) {
-            if (tokenStatusDot) tokenStatusDot.classList.add('green');
-            if (headerTokenDot) headerTokenDot.classList.add('green');
-
-            const textVal = health.message || 'Faol (Token yaroqli)';
-            if (tokenStatusText) {
-                tokenStatusText.style.color = 'var(--accent-emerald)';
-                tokenStatusText.textContent = textVal;
-            }
-            if (headerTokenText) {
-                headerTokenText.style.color = 'var(--accent-emerald)';
-                headerTokenText.textContent = `Token: ${health.expires_in_minutes}m qoldi`;
-            }
-        } else {
-            if (tokenStatusDot) tokenStatusDot.classList.add('red');
-            if (headerTokenDot) headerTokenDot.classList.add('red');
-
-            const errVal = health.message || "Muddati o'tgan / Noto'g'ri";
-            if (tokenStatusText) {
-                tokenStatusText.style.color = 'var(--accent-rose)';
-                tokenStatusText.textContent = errVal;
-            }
-            if (headerTokenText) {
-                headerTokenText.style.color = 'var(--accent-rose)';
-                headerTokenText.textContent = "Token tugagan";
-            }
-        }
-    }
-
-    const headerTokenBadge = document.getElementById('headerTokenBadge');
-    if (headerTokenBadge) {
-        headerTokenBadge.addEventListener('click', () => {
-            const adminTabBtn = document.querySelector('.tab-btn[data-tab="tab-admin"]');
-            if (adminTabBtn) adminTabBtn.click();
-        });
-    }
-
-    function loadTokenData() {
-        if (!isAdminLoggedIn) return;
-        fetch('/api/admin/token')
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    if (bearerTokenInput && data.token) {
-                        bearerTokenInput.value = data.token;
-                    }
-                    if (csrfTokenInput && data.csrf_token) {
-                        csrfTokenInput.value = data.csrf_token;
-                    }
-                    updateTokenHealthUI(data.health);
-                }
-            })
-            .catch(err => console.error("loadTokenData error:", err));
-    }
-
-    function checkTokenHealth() {
-        if (!tokenStatusDot || !tokenStatusText) return;
-        
-        tokenStatusDot.className = 'status-dot-indicator yellow';
-        tokenStatusText.style.color = 'var(--accent-amber)';
-        tokenStatusText.textContent = 'Holat tekshirilmoqda...';
-
-        const icon = checkTokenHealthBtn ? checkTokenHealthBtn.querySelector('i') : null;
-        if (icon) icon.classList.add('fa-spin');
-
-        fetch('/api/admin/token-health')
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    updateTokenHealthUI(data.health);
-                    showToast(
-                        data.health.valid ? 'success' : 'warning',
-                        'Token Holati Audit Qilindi',
-                        data.health.message
-                    );
-                }
-            })
-            .catch(err => {
-                tokenStatusDot.className = 'status-dot-indicator red';
-                tokenStatusText.style.color = 'var(--accent-rose)';
-                tokenStatusText.textContent = 'Tekshirishda xatolik';
-                console.error("checkTokenHealth error:", err);
-            })
-            .finally(() => {
-                if (icon) icon.classList.remove('fa-spin');
-            });
-    }
-
-    function saveToken() {
-        const tokenVal = bearerTokenInput ? bearerTokenInput.value.trim() : '';
-        const csrfVal = csrfTokenInput ? csrfTokenInput.value.trim() : '';
-        if (!tokenVal) {
-            showToast('warning', 'Ogohlantirish', 'Iltimos, Bearer Token matnini kiriting!');
-            return;
-        }
-
-        saveTokenBtn.disabled = true;
-        saveTokenBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...';
-
-        fetch('/api/admin/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: tokenVal, csrf_token: csrfVal })
-        })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    updateTokenHealthUI(data.health);
-                    showToast('success', 'Muvaffaqiyatli', 'Bearer va CSRF Token saqlandi!');
-                } else {
-                    showToast('error', 'Xatolik', data.error || 'Tokenni saqlashda xatolik yuz berdi');
-                }
-            })
-            .catch(err => {
-                showToast('error', 'Xatolik', 'Server bilan ulanishda xatolik: ' + err);
-            })
-            .finally(() => {
-                saveTokenBtn.disabled = false;
-                saveTokenBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Tokenlarni Saqlash';
-            });
-    }
-
-    function fetchApiData() {
-        const startDate = apiStartDate ? apiStartDate.value : '';
-        const endDate = apiEndDate ? apiEndDate.value : '';
-        const customToken = bearerTokenInput ? bearerTokenInput.value.trim() : '';
-        const customCsrf = csrfTokenInput ? csrfTokenInput.value.trim() : '';
-
-        if (!startDate || !endDate) {
-            showToast('warning', 'Sana Tanlanmagan', 'Iltimos, boshlanish va tugash sanasini tanlang!');
-            return;
-        }
-
-        if (apiSyncProgress) apiSyncProgress.style.display = 'flex';
-        if (apiSyncStatusAlert) apiSyncStatusAlert.style.display = 'none';
-        fetchApiDataBtn.disabled = true;
-        fetchApiDataBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Yuklanmoqda...';
-
-        fetch('/api/admin/fetch-api-excel', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ startDate: startDate, endDate: endDate, token: customToken, csrf_token: customCsrf })
-        })
-            .then(res => res.json().then(d => ({ status: res.status, body: d })))
-            .then(({ status, body }) => {
-                if (body.success) {
-                    if (apiSyncStatusAlert) {
-                        apiSyncStatusAlert.style.display = 'block';
-                        apiSyncStatusAlert.style.background = 'rgba(52, 211, 153, 0.15)';
-                        apiSyncStatusAlert.style.border = '1px solid rgba(52, 211, 153, 0.3)';
-                        apiSyncStatusAlert.style.color = 'var(--accent-emerald)';
-                        apiSyncStatusAlert.innerHTML = `<i class="fa-solid fa-circle-check"></i> ${body.message}`;
-                    }
-                    showToast('success', 'API Avto-Yangilash Muvaffaqiyatli', body.message);
-                    
-                    if (body.stats) {
-                        updateDashboardUI(body.stats);
-                    } else {
-                        loadStats();
-                    }
-                    loadUploadLogs();
-                } else {
-                    let errTitle = 'API Yangilash Xatoligi';
-                    if (status === 504) errTitle = '504 Gateway Time-out';
-                    else if (status === 401) errTitle = '401 Unauthorized (Token Muddati Tugagan)';
-
-                    if (apiSyncStatusAlert) {
-                        apiSyncStatusAlert.style.display = 'block';
-                        apiSyncStatusAlert.style.background = 'rgba(244, 63, 94, 0.15)';
-                        apiSyncStatusAlert.style.border = '1px solid rgba(244, 63, 94, 0.3)';
-                        apiSyncStatusAlert.style.color = 'var(--accent-rose)';
-                        apiSyncStatusAlert.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> <strong>${errTitle}:</strong> ${body.error}`;
-                    }
-                    showToast('error', errTitle, body.error || "API dan ma'lumot olishda xatolik");
-                }
-            })
-            .catch(err => {
-                if (apiSyncStatusAlert) {
-                    apiSyncStatusAlert.style.display = 'block';
-                    apiSyncStatusAlert.style.background = 'rgba(244, 63, 94, 0.15)';
-                    apiSyncStatusAlert.style.border = '1px solid rgba(244, 63, 94, 0.3)';
-                    apiSyncStatusAlert.style.color = 'var(--accent-rose)';
-                    apiSyncStatusAlert.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Ulanish xatoligi: ${err}`;
-                }
-                showToast('error', 'Ulanish Xatoligi', "Server bilan bog'lanishda xatolik: " + err);
-            })
-            .finally(() => {
-                if (apiSyncProgress) apiSyncProgress.style.display = 'none';
-                fetchApiDataBtn.disabled = false;
-                fetchApiDataBtn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> API\'dan Ma\'lumotlarni Yangilash';
-            });
-    }
-
-    if (saveTokenBtn) saveTokenBtn.addEventListener('click', saveToken);
-    if (checkTokenHealthBtn) checkTokenHealthBtn.addEventListener('click', checkTokenHealth);
-    if (fetchApiDataBtn) fetchApiDataBtn.addEventListener('click', fetchApiData);
 
     // Senior Executive PDF / Print Optimization Handlers
     window.addEventListener('beforeprint', () => {

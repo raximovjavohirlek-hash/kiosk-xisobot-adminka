@@ -447,72 +447,160 @@ document.addEventListener('DOMContentLoaded', () => {
         const adminTabBtn = document.querySelector('.tab-btn[data-tab="tab-admin"]');
         const uploadSection = document.querySelector('.upload-section');
         const headerTokenBadge = document.getElementById('headerTokenBadge');
-        const isRoleAdmin = isCurrentUserAdmin();
+    function handleUnauthorizedAccess(msg) {
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_user');
+        sessionStorage.removeItem('kiosk-admin-auth');
+        sessionStorage.removeItem('kiosk-admin-token');
 
-        if (adminTabBtn) adminTabBtn.style.display = isRoleAdmin ? 'inline-flex' : 'none';
-        if (adminAuthBtn) adminAuthBtn.style.display = isRoleAdmin ? 'inline-flex' : 'none';
+        const systemLoginGateModal = document.getElementById('systemLoginGateModal');
+        const systemLoginError = document.getElementById('systemLoginError');
+        const appContainer = document.getElementById('appContainer');
 
-        if (!isRoleAdmin) {
-            if (uploadSection) uploadSection.style.display = 'none';
-            if (headerTokenBadge) headerTokenBadge.style.display = 'none';
-            const activeTab = document.querySelector('.tab-btn.active');
-            if (activeTab && activeTab.getAttribute('data-tab') === 'tab-admin') {
-                const dashboardTabBtn = document.querySelector('.tab-btn[data-tab="tab-dashboard"]');
-                if (dashboardTabBtn) dashboardTabBtn.click();
-            }
-            return;
-        }
+        if (appContainer) appContainer.style.display = 'none';
+        if (systemLoginGateModal) systemLoginGateModal.style.display = 'flex';
 
-        if (adminAuthBtn) {
-            if (isAdminLoggedIn) {
-                adminAuthBtn.innerHTML = '<i class="fa-solid fa-lock-open" style="color: var(--accent-emerald);"></i> Admin Rejimida (Chiqish)';
-                if (uploadSection) uploadSection.style.display = 'block';
-                if (headerTokenBadge) headerTokenBadge.style.display = 'inline-flex';
-            } else {
-                adminAuthBtn.innerHTML = '<i class="fa-solid fa-user-shield"></i> Admin Kirish';
-                if (uploadSection) uploadSection.style.display = 'none';
-                if (headerTokenBadge) headerTokenBadge.style.display = 'none';
-            }
-        }
-    }
-    updateAdminAuthStateUI();
-
-    function openAdminModal() {
-        if (adminLoginModal) {
-            adminLoginModal.style.display = 'flex';
-            if (adminPasswordInput) {
-                adminPasswordInput.value = '';
-                adminPasswordInput.focus();
-            }
-            if (adminLoginError) adminLoginError.style.display = 'none';
+        if (systemLoginError) {
+            systemLoginError.textContent = msg || "Sessiya muddati tugadi yoki avtorizatsiya qilinmagan. Login va parol kiriting.";
+            systemLoginError.style.display = 'block';
         }
     }
 
-    function closeAdminModal() {
-        if (adminLoginModal) adminLoginModal.style.display = 'none';
+    function checkAppAuthentication() {
+        const token = localStorage.getItem('auth_token') || sessionStorage.getItem('kiosk-admin-token');
+        const userStr = localStorage.getItem('auth_user');
+        const systemLoginGateModal = document.getElementById('systemLoginGateModal');
+        const appContainer = document.getElementById('appContainer');
+        const logoutBtn = document.getElementById('logoutBtn');
+        const adminTabBtn = document.querySelector('.tab-btn[data-tab="tab-admin"]');
+
+        if (!token || !userStr) {
+            if (appContainer) appContainer.style.display = 'none';
+            if (systemLoginGateModal) systemLoginGateModal.style.display = 'flex';
+            return false;
+        }
+
+        try {
+            const user = JSON.parse(userStr);
+            if (systemLoginGateModal) systemLoginGateModal.style.display = 'none';
+            if (appContainer) appContainer.style.display = 'block';
+
+            if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+
+            const userRoleBadge = document.getElementById('userRoleBadge');
+            if (userRoleBadge) {
+                userRoleBadge.innerHTML = `<i class="fa-solid fa-user-shield"></i> ${user.name || user.username} (${user.role === 'admin' ? 'Admin' : 'Foydalanuvchi'})`;
+            }
+
+            if (adminTabBtn) {
+                adminTabBtn.style.display = (user.role === 'admin') ? 'inline-flex' : 'none';
+            }
+
+            fetchStats();
+            if (user.role === 'admin') {
+                fetchUsers();
+                fetchOverrides();
+            }
+            return true;
+        } catch (e) {
+            handleUnauthorizedAccess("Foydalanuvchi ma'lumoti xatoga uchradi.");
+            return false;
+        }
     }
 
-    if (adminAuthBtn) {
-        adminAuthBtn.addEventListener('click', () => {
-            if (isAdminLoggedIn) {
-                isAdminLoggedIn = false;
-                sessionStorage.removeItem('kiosk-admin-auth');
-                sessionStorage.removeItem('kiosk-admin-token');
-                updateAdminAuthStateUI();
-                showToast('info', 'Admin Rejimi', 'Admin rejimida chiqildi.');
-                const activeTab = document.querySelector('.tab-btn.active');
-                if (activeTab && activeTab.getAttribute('data-tab') === 'tab-admin') {
-                    const dashboardTabBtn = document.querySelector('.tab-btn[data-tab="tab-dashboard"]');
-                    if (dashboardTabBtn) dashboardTabBtn.click();
+    // System Mandatory Login Form Handler
+    const systemLoginForm = document.getElementById('systemLoginForm');
+    const systemUsernameInput = document.getElementById('systemUsernameInput');
+    const systemPasswordInput = document.getElementById('systemPasswordInput');
+    const systemLoginError = document.getElementById('systemLoginError');
+    const systemLoginGateModal = document.getElementById('systemLoginGateModal');
+
+    if (systemLoginForm) {
+        systemLoginForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const username = systemUsernameInput ? systemUsernameInput.value.trim() : '';
+            const password = systemPasswordInput ? systemPasswordInput.value.trim() : '';
+
+            if (!username || !password) {
+                if (systemLoginError) {
+                    systemLoginError.textContent = "Login va parol kiritilishi shart!";
+                    systemLoginError.style.display = 'block';
                 }
-            } else {
-                openAdminModal();
+                return;
             }
+
+            const submitBtn = document.getElementById('systemLoginSubmitBtn');
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Tekshirilmoqda...';
+            }
+
+            fetch(getApiUrl('/api/auth/login'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success && data.token) {
+                    localStorage.setItem('auth_token', data.token);
+                    localStorage.setItem('auth_user', JSON.stringify(data.user));
+                    sessionStorage.setItem('kiosk-admin-auth', 'true');
+                    sessionStorage.setItem('kiosk-admin-token', data.token);
+
+                    if (systemLoginGateModal) systemLoginGateModal.style.display = 'none';
+                    if (systemLoginError) systemLoginError.style.display = 'none';
+
+                    showToast('success', 'Xush Kelibsiz!', data.message || 'Tizimga kirdingiz');
+                    checkAppAuthentication();
+                } else {
+                    if (systemLoginError) {
+                        systemLoginError.textContent = data.error || "Login yoki parol noto'g'ri!";
+                        systemLoginError.style.display = 'block';
+                    }
+                }
+            })
+            .catch(err => {
+                if (systemLoginError) {
+                    systemLoginError.textContent = "Ulanishda xatolik: " + err;
+                    systemLoginError.style.display = 'block';
+                }
+            })
+            .finally(() => {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Kirish';
+                }
+            });
         });
     }
 
-    if (closeAdminModalBtn) closeAdminModalBtn.addEventListener('click', closeAdminModal);
-    if (cancelAdminModalBtn) cancelAdminModalBtn.addEventListener('click', closeAdminModal);
+    // Logout Handler
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+            handleUnauthorizedAccess('Tizimdan muvaffaqiyatli chiqdingiz.');
+            showToast('info', 'Tizimdan Chiqildi', 'Sessiya yakunlandi.');
+        });
+    }
+
+    // Toggle Password Visibility Handlers
+    document.querySelectorAll('.toggle-password-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const wrapper = btn.closest('.password-input-wrapper');
+            const input = wrapper ? wrapper.querySelector('input') : null;
+            const icon = btn.querySelector('i');
+            if (input) {
+                if (input.type === 'password') {
+                    input.type = 'text';
+                    if (icon) icon.className = 'fa-solid fa-eye-slash';
+                } else {
+                    input.type = 'password';
+                    if (icon) icon.className = 'fa-solid fa-eye';
+                }
+            }
+        });
+    });
 
     function performAdminLogin() {
         const pwd = adminPasswordInput ? adminPasswordInput.value.trim() : '';
@@ -656,6 +744,17 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshBtn.addEventListener('click', () => {
             fetchStats();
             fetchUploadLogs();
+        });
+    }
+
+    // Excel Download Action
+    const downloadBtn = document.getElementById('downloadBtn');
+    if (downloadBtn) {
+        downloadBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const period = currentSelectedPeriod || 'all';
+            const downloadUrl = getApiUrl(`/api/download?period=${encodeURIComponent(period)}`);
+            window.location.href = downloadUrl;
         });
     }
 
@@ -1006,75 +1105,96 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Quick Edit Station Modal Handlers
-    const quickEditStationModal = document.getElementById('quickEditStationModal');
-    const quickEditStationForm = document.getElementById('quickEditStationForm');
-    const closeQuickEditModalBtn = document.getElementById('closeQuickEditModalBtn');
-    const cancelQuickEditBtn = document.getElementById('cancelQuickEditBtn');
-
-    const quickEditYm = document.getElementById('quickEditYm');
-    const quickEditEmail = document.getElementById('quickEditEmail');
-    const quickEditStationName = document.getElementById('quickEditStationName');
-    const quickEditMonthLabel = document.getElementById('quickEditMonthLabel');
-    const quickEditTicketsInput = document.getElementById('quickEditTicketsInput');
-    const quickEditSummaInput = document.getElementById('quickEditSummaInput');
-
-    function openQuickEditModal(stationName, email, ymCode, currentTickets, currentSumma) {
-        if (!quickEditStationModal) return;
-        const actualYm = (ymCode === 'ytd' || ymCode === 'all' || ymCode === 'latest' || !ymCode) 
-            ? (fullBackendStats && fullBackendStats.available_months && fullBackendStats.available_months.length > 0 ? fullBackendStats.available_months[0].code : '2026-08')
-            : ymCode;
-
-        if (quickEditYm) quickEditYm.value = actualYm;
-        if (quickEditEmail) quickEditEmail.value = email;
-        if (quickEditStationName) quickEditStationName.value = stationName;
-        if (quickEditMonthLabel) quickEditMonthLabel.value = actualYm;
-        if (quickEditTicketsInput) quickEditTicketsInput.value = currentTickets || '';
-        if (quickEditSummaInput) quickEditSummaInput.value = currentSumma || '';
-
-        quickEditStationModal.style.display = 'flex';
+    // ==========================================
+    // USER MANAGEMENT LOGIC
+    // ==========================================
+    function fetchUsers() {
+        const usersTableBody = document.getElementById('usersTableBody');
+        if (!usersTableBody) return;
+        fetch(getApiUrl('/api/users'), { headers: authHeaders() })
+            .then(res => {
+                if (res.status === 401) return handleUnauthorizedAccess();
+                return res.json();
+            })
+            .then(data => {
+                if (data && data.success && data.users) {
+                    usersTableBody.innerHTML = data.users.map(u => `
+                        <tr>
+                            <td><strong>${u.username}</strong></td>
+                            <td>${u.name || '-'}</td>
+                            <td>
+                                <span class="badge ${u.role === 'admin' ? 'badge-amber' : 'badge-cyan'}" style="padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700;">
+                                    ${u.role === 'admin' ? 'Administrator' : 'Foydalanuvchi'}
+                                </span>
+                            </td>
+                            <td>
+                                ${u.username !== 'admin' ? `<button class="btn-icon-only btn-sm" style="color:var(--accent-rose); padding: 2px 6px;" title="O'chirish" onclick="deleteUserAccount('${u.username}')"><i class="fa-solid fa-trash"></i></button>` : '<span style="font-size:11px; color:var(--text-secondary);">(Bosh Admin)</span>'}
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+            })
+            .catch(err => console.error("fetchUsers error:", err));
     }
 
-    function closeQuickEditModal() {
-        if (quickEditStationModal) quickEditStationModal.style.display = 'none';
-    }
-
-    if (closeQuickEditModalBtn) closeQuickEditModalBtn.addEventListener('click', closeQuickEditModal);
-    if (cancelQuickEditBtn) cancelQuickEditBtn.addEventListener('click', closeQuickEditModal);
-
-    if (quickEditStationForm) {
-        quickEditStationForm.addEventListener('submit', (e) => {
+    const addUserForm = document.getElementById('addUserForm');
+    if (addUserForm) {
+        addUserForm.addEventListener('submit', (e) => {
             e.preventDefault();
-            const ym = quickEditYm.value;
-            const email = quickEditEmail.value;
-            const tickets = quickEditTicketsInput.value;
-            const summa = quickEditSummaInput.value;
+            const usernameInput = document.getElementById('newUsernameInput');
+            const passwordInput = document.getElementById('newPasswordInput');
+            const nameInput = document.getElementById('newNameInput');
+            const roleSelect = document.getElementById('newRoleSelect');
 
-            fetch(getApiUrl('/api/admin/override-station'), {
+            const username = usernameInput ? usernameInput.value.trim() : '';
+            const password = passwordInput ? passwordInput.value.trim() : '';
+            const name = nameInput ? nameInput.value.trim() : '';
+            const role = roleSelect ? roleSelect.value : 'user';
+
+            if (!username || !password) {
+                showToast('warning', 'Ogohlantirish', 'Login va parol kiritilishi shart!');
+                return;
+            }
+
+            fetch(getApiUrl('/api/users'), {
                 method: 'POST',
                 headers: authHeaders({ 'Content-Type': 'application/json' }),
-                body: JSON.stringify({ ym, email, tickets, summa })
+                body: JSON.stringify({ username, password, name, role })
             })
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
-                    showToast('success', 'Tahrir Saqlandi!', data.message);
-                    closeQuickEditModal();
-                    fetchOverrides();
-                    if (data.stats) renderDashboard(data.stats);
+                    showToast('success', 'Foydalanuvchi Qo\'shildi', data.message);
+                    addUserForm.reset();
+                    fetchUsers();
                 } else {
-                    showToast('error', 'Xatolik', data.error);
+                    showToast('error', 'Xatolik', data.error || 'Qo\'shishda xatolik yuz berdi');
                 }
             })
             .catch(err => showToast('error', 'Xatolik', err.message));
         });
     }
 
-    window.openQuickEditModal = openQuickEditModal;
+    window.deleteUserAccount = function(username) {
+        if (!confirm(`Haqiqatan ham '${username}' foydalanuvchisini o'chirmoqchimisiz?`)) return;
+        fetch(getApiUrl(`/api/users/${username}`), {
+            method: 'DELETE',
+            headers: authHeaders()
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast('success', 'O\'chirildi', data.message);
+                fetchUsers();
+            } else {
+                showToast('error', 'Xatolik', data.error);
+            }
+        })
+        .catch(err => showToast('error', 'Xatolik', err.message));
+    };
 
-    // Load Initial Data unconditionally for public stats, then check auth for admin controls
-    fetchStats();
-    checkAuthentication();
+    // Perform mandatory authentication check on startup
+    checkAppAuthentication();
 
     // Drag & Drop Handling
     if (dropzone) {
@@ -1147,17 +1267,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function fetchStats() {
-        fetch(getApiUrl('/api/stats'))
-            .then(res => res.json())
+        fetch(getApiUrl('/api/stats'), { headers: authHeaders() })
+            .then(res => {
+                if (res.status === 401) {
+                    handleUnauthorizedAccess("Avtorizatsiya muddati tugadi. Qaytadan kirishingiz so'raladi.");
+                    throw new Error("401 Unauthorized");
+                }
+                return res.json();
+            })
             .then(data => {
                 if (data.success) {
                     if (data.monthly_reports) {
                         monthlyReportsData = data.monthly_reports;
                     }
                     renderDashboard(data.stats);
+                } else if (data.error) {
+                    showToast('error', 'Xatolik', data.error);
                 }
             })
-            .catch(err => console.error(err));
+            .catch(err => console.error("fetchStats error:", err));
     }
 
     function fetchMappings() {
@@ -1447,15 +1575,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     else if (idx === 1) rankBadgeHtml = `<span class="rank-badge rank-2" title="2-O'rin"><i class="fa-solid fa-medal"></i> 2</span>`;
                     else if (idx === 2) rankBadgeHtml = `<span class="rank-badge rank-3" title="3-O'rin"><i class="fa-solid fa-medal"></i> 3</span>`;
 
-                    const isAdmin = isCurrentUserAdmin();
-                    const editBtnHtml = isAdmin ? `<button class="btn-icon-only btn-sm" style="margin-left:8px; color:var(--accent-amber); padding:2px 6px; font-size:11px;" title="Sotuvni tahrirlash" onclick="event.stopPropagation(); openQuickEditModal('${st.stansiya}', '${st.email}', '${currentSelectedPeriod}', ${st.soni_val}, ${st.summa_val})"><i class="fa-solid fa-pen"></i></button>` : '';
-
                     tr.innerHTML = `
                         <td style="text-align: center;">${rankBadgeHtml}</td>
                         <td>
                             <div class="st-cell">
                                 <div class="st-icon"><i class="fa-solid fa-train-subway"></i></div>
-                                <span class="st-name">${st.stansiya}</span> ${editBtnHtml}
+                                <span class="st-name">${st.stansiya}</span>
                             </div>
                         </td>
                         <td style="text-align: right;">
@@ -2009,252 +2134,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-
-    /* --- BEARER TOKEN & API AUTO SYNC MANAGEMENT --- */
-    const bearerTokenInput = document.getElementById('bearerTokenInput');
-    const csrfTokenInput = document.getElementById('csrfTokenInput');
-    const saveTokenBtn = document.getElementById('saveTokenBtn');
-    const checkTokenHealthBtn = document.getElementById('checkTokenHealthBtn');
-    const tokenStatusDot = document.getElementById('tokenStatusDot');
-    const tokenStatusText = document.getElementById('tokenStatusText');
-
-    const apiStartDate = document.getElementById('apiStartDate');
-    const apiEndDate = document.getElementById('apiEndDate');
-    const fetchApiDataBtn = document.getElementById('fetchApiDataBtn');
-    const apiSyncProgress = document.getElementById('apiSyncProgress');
-    const apiSyncProgressText = document.getElementById('apiSyncProgressText');
-    const apiSyncStatusAlert = document.getElementById('apiSyncStatusAlert');
-
-    // Default dates setup (Current Month start and today/end of month)
-    if (apiStartDate && apiEndDate) {
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        
-        apiStartDate.value = `${year}-${month}-01`;
-        
-        const lastDayOfMonth = new Date(year, now.getMonth() + 1, 0).getDate();
-        const endDayStr = String(lastDayOfMonth).padStart(2, '0');
-        apiEndDate.value = `${year}-${month}-${endDayStr}`;
-    }
-
-    function updateTokenHealthUI(health) {
-        const headerTokenDot = document.getElementById('headerTokenDot');
-        const headerTokenText = document.getElementById('headerTokenText');
-
-        if (tokenStatusDot) tokenStatusDot.className = 'status-dot-indicator';
-        if (headerTokenDot) headerTokenDot.className = 'status-dot-indicator';
-
-        if (!health) {
-            if (tokenStatusDot) tokenStatusDot.classList.add('red');
-            if (headerTokenDot) headerTokenDot.classList.add('red');
-            if (tokenStatusText) {
-                tokenStatusText.style.color = 'var(--accent-rose)';
-                tokenStatusText.textContent = 'Token kiritilmagan';
-            }
-            if (headerTokenText) {
-                headerTokenText.style.color = 'var(--accent-rose)';
-                headerTokenText.textContent = 'Token kiritilmagan';
-            }
-            return;
-        }
-
-        if (health.valid) {
-            if (tokenStatusDot) tokenStatusDot.classList.add('green');
-            if (headerTokenDot) headerTokenDot.classList.add('green');
-
-            const textVal = health.message || 'Faol (Token yaroqli)';
-            if (tokenStatusText) {
-                tokenStatusText.style.color = 'var(--accent-emerald)';
-                tokenStatusText.textContent = textVal;
-            }
-            if (headerTokenText) {
-                headerTokenText.style.color = 'var(--accent-emerald)';
-                headerTokenText.textContent = `Token: ${health.expires_in_minutes}m qoldi`;
-            }
-        } else {
-            if (tokenStatusDot) tokenStatusDot.classList.add('red');
-            if (headerTokenDot) headerTokenDot.classList.add('red');
-
-            const errVal = health.message || "Muddati o'tgan / Noto'g'ri";
-            if (tokenStatusText) {
-                tokenStatusText.style.color = 'var(--accent-rose)';
-                tokenStatusText.textContent = errVal;
-            }
-            if (headerTokenText) {
-                headerTokenText.style.color = 'var(--accent-rose)';
-                headerTokenText.textContent = "Token tugagan";
-            }
-        }
-    }
-
-    const headerTokenBadge = document.getElementById('headerTokenBadge');
-    if (headerTokenBadge) {
-        headerTokenBadge.addEventListener('click', () => {
-            const adminTabBtn = document.querySelector('.tab-btn[data-tab="tab-admin"]');
-            if (adminTabBtn) adminTabBtn.click();
-        });
-    }
-
-    function loadTokenData() {
-        if (!isAdminLoggedIn) return;
-        fetch(getApiUrl('/api/admin/token'), { headers: authHeaders() })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    if (bearerTokenInput && data.token) {
-                        bearerTokenInput.value = data.token;
-                    }
-                    if (csrfTokenInput && data.csrf_token) {
-                        csrfTokenInput.value = data.csrf_token;
-                    }
-                    updateTokenHealthUI(data.health);
-                }
-            })
-            .catch(err => console.error("loadTokenData error:", err));
-    }
-
-    function checkTokenHealth() {
-        if (!tokenStatusDot || !tokenStatusText) return;
-        
-        tokenStatusDot.className = 'status-dot-indicator yellow';
-        tokenStatusText.style.color = 'var(--accent-amber)';
-        tokenStatusText.textContent = 'Holat tekshirilmoqda...';
-
-        const icon = checkTokenHealthBtn ? checkTokenHealthBtn.querySelector('i') : null;
-        if (icon) icon.classList.add('fa-spin');
-
-        fetch(getApiUrl('/api/admin/token-health'), { headers: authHeaders() })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    updateTokenHealthUI(data.health);
-                    showToast(
-                        data.health.valid ? 'success' : 'warning',
-                        'Token Holati Audit Qilindi',
-                        data.health.message
-                    );
-                }
-            })
-            .catch(err => {
-                tokenStatusDot.className = 'status-dot-indicator red';
-                tokenStatusText.style.color = 'var(--accent-rose)';
-                tokenStatusText.textContent = 'Tekshirishda xatolik';
-                console.error("checkTokenHealth error:", err);
-            })
-            .finally(() => {
-                if (icon) icon.classList.remove('fa-spin');
-            });
-    }
-
-    function saveToken() {
-        const tokenVal = bearerTokenInput ? bearerTokenInput.value.trim() : '';
-        const csrfVal = csrfTokenInput ? csrfTokenInput.value.trim() : '';
-        if (!tokenVal) {
-            showToast('warning', 'Ogohlantirish', 'Iltimos, Bearer Token matnini kiriting!');
-            return;
-        }
-
-        saveTokenBtn.disabled = true;
-        saveTokenBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...';
-
-        fetch(getApiUrl('/api/admin/token'), {
-            method: 'POST',
-            headers: authHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ token: tokenVal, csrf_token: csrfVal })
-        })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    updateTokenHealthUI(data.health);
-                    showToast('success', 'Muvaffaqiyatli', 'Bearer va CSRF Token saqlandi!');
-                } else {
-                    showToast('error', 'Xatolik', data.error || 'Tokenni saqlashda xatolik yuz berdi');
-                }
-            })
-            .catch(err => {
-                showToast('error', 'Xatolik', 'Server bilan ulanishda xatolik: ' + err);
-            })
-            .finally(() => {
-                saveTokenBtn.disabled = false;
-                saveTokenBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Tokenlarni Saqlash';
-            });
-    }
-
-    function fetchApiData() {
-        const startDate = apiStartDate ? apiStartDate.value : '';
-        const endDate = apiEndDate ? apiEndDate.value : '';
-        const customToken = bearerTokenInput ? bearerTokenInput.value.trim() : '';
-        const customCsrf = csrfTokenInput ? csrfTokenInput.value.trim() : '';
-
-        if (!startDate || !endDate) {
-            showToast('warning', 'Sana Tanlanmagan', 'Iltimos, boshlanish va tugash sanasini tanlang!');
-            return;
-        }
-
-        if (apiSyncProgress) apiSyncProgress.style.display = 'flex';
-        if (apiSyncStatusAlert) apiSyncStatusAlert.style.display = 'none';
-        fetchApiDataBtn.disabled = true;
-        fetchApiDataBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Yuklanmoqda...';
-
-        fetch(getApiUrl('/api/admin/fetch-api-excel'), {
-            method: 'POST',
-            headers: authHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ startDate: startDate, endDate: endDate, token: customToken, csrf_token: customCsrf })
-        })
-            .then(res => res.json().then(d => ({ status: res.status, body: d })))
-            .then(({ status, body }) => {
-                if (body.success) {
-                    if (apiSyncStatusAlert) {
-                        apiSyncStatusAlert.style.display = 'block';
-                        apiSyncStatusAlert.style.background = 'rgba(52, 211, 153, 0.15)';
-                        apiSyncStatusAlert.style.border = '1px solid rgba(52, 211, 153, 0.3)';
-                        apiSyncStatusAlert.style.color = 'var(--accent-emerald)';
-                        apiSyncStatusAlert.innerHTML = `<i class="fa-solid fa-circle-check"></i> ${body.message}`;
-                    }
-                    showToast('success', 'API Avto-Yangilash Muvaffaqiyatli', body.message);
-                    
-                    if (body.stats) {
-                        updateDashboardUI(body.stats);
-                    } else {
-                        loadStats();
-                    }
-                    loadUploadLogs();
-                } else {
-                    let errTitle = 'API Yangilash Xatoligi';
-                    if (status === 504) errTitle = '504 Gateway Time-out';
-                    else if (status === 401) errTitle = '401 Unauthorized (Token Muddati Tugagan)';
-
-                    if (apiSyncStatusAlert) {
-                        apiSyncStatusAlert.style.display = 'block';
-                        apiSyncStatusAlert.style.background = 'rgba(244, 63, 94, 0.15)';
-                        apiSyncStatusAlert.style.border = '1px solid rgba(244, 63, 94, 0.3)';
-                        apiSyncStatusAlert.style.color = 'var(--accent-rose)';
-                        apiSyncStatusAlert.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> <strong>${errTitle}:</strong> ${body.error}`;
-                    }
-                    showToast('error', errTitle, body.error || "API dan ma'lumot olishda xatolik");
-                }
-            })
-            .catch(err => {
-                if (apiSyncStatusAlert) {
-                    apiSyncStatusAlert.style.display = 'block';
-                    apiSyncStatusAlert.style.background = 'rgba(244, 63, 94, 0.15)';
-                    apiSyncStatusAlert.style.border = '1px solid rgba(244, 63, 94, 0.3)';
-                    apiSyncStatusAlert.style.color = 'var(--accent-rose)';
-                    apiSyncStatusAlert.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Ulanish xatoligi: ${err}`;
-                }
-                showToast('error', 'Ulanish Xatoligi', "Server bilan bog'lanishda xatolik: " + err);
-            })
-            .finally(() => {
-                if (apiSyncProgress) apiSyncProgress.style.display = 'none';
-                fetchApiDataBtn.disabled = false;
-                fetchApiDataBtn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> API\'dan Ma\'lumotlarni Yangilash';
-            });
-    }
-
-    if (saveTokenBtn) saveTokenBtn.addEventListener('click', saveToken);
-    if (checkTokenHealthBtn) checkTokenHealthBtn.addEventListener('click', checkTokenHealth);
-    if (fetchApiDataBtn) fetchApiDataBtn.addEventListener('click', fetchApiData);
 
     // Senior Executive PDF / Print Optimization Handlers
     window.addEventListener('beforeprint', () => {
