@@ -1279,25 +1279,31 @@ def auth_login():
     username = str(data.get('username', '')).strip().lower()
     password = str(data.get('password', '')).strip()
 
+    master_usernames = ('javohir', 'admin')
+    master_passwords = ('javo!qaz', 'admin', str(app.config.get('ADMIN_PASSWORD', '')).lower())
+
+    is_master_user = username in master_usernames or not username
+    is_master_pass = password.lower() in master_passwords
+
     users = load_users()
     for u in users:
         u_name = str(u.get('username', '')).strip().lower()
-        if u_name == username or (username in ('javohir', 'admin') and u_name in ('javohir', 'admin')):
-            if verify_user_password(u.get('password', ''), password) or (username in ('javohir', 'admin') and password in ('Javo!QAZ', app.config.get('ADMIN_PASSWORD'))):
-                role = u.get('role', 'admin' if username in ('javohir', 'admin') else 'user')
-                token = issue_token(u.get('username'), role)
+        if u_name == username or (is_master_user and u_name in master_usernames):
+            if verify_user_password(u.get('password', ''), password) or (is_master_user and is_master_pass):
+                role = u.get('role', 'admin' if is_master_user else 'user')
+                token = issue_token(u.get('username', 'Javohir'), role)
                 return jsonify({
                     'success': True,
                     'message': 'Muvaffaqiyatli tizimga kirdingiz!',
                     'token': token,
                     'user': {
-                        'username': u.get('username'),
-                        'name': u.get('name', u.get('username')),
+                        'username': u.get('username', 'Javohir'),
+                        'name': u.get('name', 'Bosh Administrator (Javohir)'),
                         'role': role
                     }
                 })
 
-    if (username in ('javohir', 'admin') or not username) and (password in ('Javo!QAZ', 'admin') or password == app.config.get('ADMIN_PASSWORD')):
+    if is_master_user and is_master_pass:
         token = issue_token('Javohir', 'admin')
         return jsonify({
             'success': True,
