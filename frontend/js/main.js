@@ -443,10 +443,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function updateAdminAuthStateUI() {
-        const adminTabBtn = document.querySelector('.tab-btn[data-tab="tab-admin"]');
-        const uploadSection = document.querySelector('.upload-section');
-        const headerTokenBadge = document.getElementById('headerTokenBadge');
     function handleUnauthorizedAccess(msg) {
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_user');
@@ -778,84 +774,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 
-    // Authentication & System Login Gate
-    const systemLoginGateModal = document.getElementById('systemLoginGateModal');
-    const systemLoginForm = document.getElementById('systemLoginForm');
-    const systemUsernameInput = document.getElementById('systemUsernameInput');
-    const systemPasswordInput = document.getElementById('systemPasswordInput');
-    const systemLoginError = document.getElementById('systemLoginError');
-    const logoutBtn = document.getElementById('logoutBtn');
 
-    function checkAuthentication() {
-        const authUser = localStorage.getItem('auth_user');
-        if (authUser) {
-            try {
-                const userObj = JSON.parse(authUser);
-                if (systemLoginGateModal) systemLoginGateModal.style.display = 'none';
-                if (logoutBtn) logoutBtn.style.display = 'inline-flex';
-                updateAdminAuthStateUI();
-                fetchStats();
-                fetchMappings();
-                fetchUploadLogs();
-                fetchUsers();
-                fetchOverrides();
-                return true;
-            } catch (e) {
-                localStorage.removeItem('auth_user');
-            }
-        }
-        if (systemLoginGateModal) systemLoginGateModal.style.display = 'flex';
-        if (logoutBtn) logoutBtn.style.display = 'none';
-        return false;
-    }
-
-    if (systemLoginForm) {
-        systemLoginForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const username = systemUsernameInput.value.trim();
-            const password = systemPasswordInput.value.trim();
-            if (!username || !password) return;
-
-            if (systemLoginError) systemLoginError.style.display = 'none';
-
-            fetch(getApiUrl('/api/auth/login'), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    localStorage.setItem('auth_user', JSON.stringify(data.user));
-                    if (data.token) localStorage.setItem('auth_token', data.token);
-                    if (systemLoginGateModal) systemLoginGateModal.style.display = 'none';
-                    if (logoutBtn) logoutBtn.style.display = 'inline-flex';
-                    showToast('success', 'Xush kelibsiz!', data.message || 'Tizimga muvaffaqiyatli kirdingiz.');
-                    checkAuthentication();
-                } else {
-                    if (systemLoginError) {
-                        systemLoginError.textContent = data.error || "Login yoki parol noto'g'ri!";
-                        systemLoginError.style.display = 'block';
-                    }
-                }
-            })
-            .catch(err => {
-                if (systemLoginError) {
-                    systemLoginError.textContent = 'Serverga ulanishda xatolik: ' + err.message;
-                    systemLoginError.style.display = 'block';
-                }
-            });
-        });
-    }
-
-    if (logoutBtn) {
-        logoutBtn.addEventListener('click', () => {
-            localStorage.removeItem('auth_user');
-            localStorage.removeItem('auth_token');
-            showToast('info', 'Chiqildi', 'Tizimdan chiqdingiz.');
-            setTimeout(() => { window.location.reload(); }, 600);
-        });
-    }
 
     function renderDashboard(stats) {
         fullBackendStats = stats;
@@ -865,94 +784,7 @@ document.addEventListener('DOMContentLoaded', () => {
         applyPeriodFilter();
     }
 
-    // User Management Logic
-    const addUserForm = document.getElementById('addUserForm');
-    const newUsernameInput = document.getElementById('newUsernameInput');
-    const newPasswordInput = document.getElementById('newPasswordInput');
-    const newNameInput = document.getElementById('newNameInput');
-    const newRoleSelect = document.getElementById('newRoleSelect');
-    const usersTableBody = document.getElementById('usersTableBody');
 
-    function fetchUsers() {
-        if (!usersTableBody) return;
-        fetch(getApiUrl('/api/users'), { headers: authHeaders() })
-        .then(res => res.json())
-        .then(data => {
-            if (data.success && data.users) {
-                renderUsersTable(data.users);
-            }
-        })
-        .catch(err => console.error("fetchUsers error:", err));
-    }
-
-    function renderUsersTable(users) {
-        if (!usersTableBody) return;
-        usersTableBody.innerHTML = '';
-        if (users.length === 0) {
-            usersTableBody.innerHTML = '<tr><td colspan="4" class="empty-row">Foydalanuvchilar yo&apos;q</td></tr>';
-            return;
-        }
-        users.forEach(u => {
-            const tr = document.createElement('tr');
-            const isMasterAdmin = u.username.toLowerCase() === 'admin';
-            tr.innerHTML = `
-                <td><strong><i class="fa-solid fa-user" style="color: var(--accent-cyan);"></i> ${u.username}</strong></td>
-                <td>${u.name || u.username}</td>
-                <td><span class="card-badge ${u.role === 'admin' ? 'badge-amber' : ''}">${u.role === 'admin' ? 'Administrator' : 'Foydalanuvchi'}</span></td>
-                <td>
-                    ${isMasterAdmin ? '<span style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-lock"></i> Asosiy</span>' : `<button class="btn btn-sm btn-rose delete-user-btn" data-username="${u.username}"><i class="fa-solid fa-trash"></i></button>`}
-                </td>
-            `;
-            usersTableBody.appendChild(tr);
-        });
-
-        document.querySelectorAll('.delete-user-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const targetUsername = e.currentTarget.getAttribute('data-username');
-                if (confirm(`Haqiqatan ham '${targetUsername}' foydalanuvchisini o'chirmoqchimisiz?`)) {
-                    fetch(getApiUrl('/api/users/' + encodeURIComponent(targetUsername)), { method: 'DELETE', headers: authHeaders() })
-                    .then(res => res.json())
-                    .then(data => {
-                        if (data.success) {
-                            showToast('success', "O'chirildi", data.message);
-                            fetchUsers();
-                        } else {
-                            showToast('error', 'Xatolik', data.error);
-                        }
-                    });
-                }
-            });
-        });
-    }
-
-    if (addUserForm) {
-        addUserForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const username = newUsernameInput.value.trim();
-            const password = newPasswordInput.value.trim();
-            const name = newNameInput.value.trim();
-            const role = newRoleSelect.value;
-
-            if (!username || !password) return;
-
-            fetch(getApiUrl('/api/users'), {
-                method: 'POST',
-                headers: authHeaders({ 'Content-Type': 'application/json' }),
-                body: JSON.stringify({ username, password, name, role })
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    showToast('success', "Qo'shildi", data.message);
-                    addUserForm.reset();
-                    fetchUsers();
-                } else {
-                    showToast('error', 'Xatolik', data.error);
-                }
-            })
-            .catch(err => showToast('error', 'Xatolik', err.message));
-        });
-    }
 
     // Password Visibility Toggle Logic
     document.addEventListener('click', (e) => {
