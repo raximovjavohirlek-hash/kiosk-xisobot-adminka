@@ -580,22 +580,30 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Toggle Password Visibility Handlers
-    document.querySelectorAll('.toggle-password-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const wrapper = btn.closest('.password-input-wrapper');
-            const input = wrapper ? wrapper.querySelector('input') : null;
-            const icon = btn.querySelector('i');
-            if (input) {
-                if (input.type === 'password') {
-                    input.type = 'text';
-                    if (icon) icon.className = 'fa-solid fa-eye-slash';
-                } else {
-                    input.type = 'password';
-                    if (icon) icon.className = 'fa-solid fa-eye';
-                }
+    // Toggle Password Visibility Handlers (Global Delegation)
+    document.addEventListener('click', (e) => {
+        const toggleBtn = e.target.closest('.toggle-password-btn, .btn-toggle-pwd');
+        if (!toggleBtn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const wrapper = toggleBtn.closest('.password-input-wrapper') || toggleBtn.parentElement;
+        if (!wrapper) return;
+        const input = wrapper.querySelector('input');
+        if (!input) return;
+        const icon = toggleBtn.querySelector('i');
+        if (input.type === 'password') {
+            input.type = 'text';
+            if (icon) {
+                icon.className = 'fa-solid fa-eye-slash';
+                icon.style.color = 'var(--accent-cyan)';
             }
-        });
+        } else {
+            input.type = 'password';
+            if (icon) {
+                icon.className = 'fa-solid fa-eye';
+                icon.style.color = '';
+            }
+        }
     });
 
     // Tab Switching Logic
