@@ -562,12 +562,21 @@
                     </div>
                     
                     <form id="overrideForm" style="margin-top: 16px; background: rgba(0, 0, 0, 0.15); padding: 18px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.08);">
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; align-items: end;">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; align-items: end;">
                             <div>
                                 <label for="overrideYmSelect" style="font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px;">
                                     <i class="fa-solid fa-calendar-days"></i> Hisobot Oyi:
                                 </label>
                                 <select id="overrideYmSelect" class="input-control" style="width: 100%;">
+                                    <!-- Populated dynamically -->
+                                </select>
+                            </div>
+                            <div>
+                                <label for="overrideDaySelect" style="font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px;">
+                                    <i class="fa-solid fa-calendar-day"></i> Kun / Sana:
+                                </label>
+                                <select id="overrideDaySelect" class="input-control" style="width: 100%;">
+                                    <option value="ALL">Barcha kunlar (Oylik jami)</option>
                                     <!-- Populated dynamically -->
                                 </select>
                             </div>
@@ -609,6 +618,7 @@
                                 <thead>
                                     <tr>
                                         <th>Oy</th>
+                                        <th>Kun / Sana</th>
                                         <th>Kassa Nomi</th>
                                         <th>Chiptalar Soni</th>
                                         <th>Jami Summa</th>

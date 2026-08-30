@@ -1370,6 +1370,7 @@ def override_station_stats():
     try:
         data = request.json or {}
         ym = str(data.get('ym', '')).strip()
+        day_str = str(data.get('day_str', 'ALL')).strip()
         email = str(data.get('email', '')).strip().lower()
         tickets = data.get('tickets')
         summa = data.get('summa')
@@ -1384,7 +1385,7 @@ def override_station_stats():
         email_map = load_mappings()
 
         from database import save_station_override, get_all_stats_from_db
-        save_station_override(db_path, ym, email, tickets, summa, email_map)
+        save_station_override(db_path, ym, email, tickets, summa, day_str=day_str, email_map=email_map)
 
         invalidate_stats_cache()
         db_stats = get_all_stats_from_db(db_path, email_map)
@@ -1401,9 +1402,10 @@ def override_station_stats():
             stats = None
 
         station_name = email_map.get(email, {}).get('station', email)
+        period_desc = f"{day_str} sanasi" if day_str != 'ALL' else f"{ym} oyi"
         return jsonify({
             'success': True,
-            'message': f"'{station_name}' kassasining {ym} oyi uchun ko'rsatkichlari muvaffaqiyatli o'zgartirildi va ma'lumotlar bazasiga saqlandi!",
+            'message': f"'{station_name}' kassasining {period_desc} uchun ko'rsatkichlari muvaffaqiyatli o'zgartirildi va saqlandi!",
             'stats': stats
         })
     except Exception as ex:
@@ -1420,10 +1422,11 @@ def handle_overrides():
     if request.method == 'DELETE':
         data = request.json or {}
         ym = str(data.get('ym', '')).strip()
+        day_str = str(data.get('day_str', 'ALL')).strip()
         email = str(data.get('email', '')).strip().lower()
         if not ym or not email:
             return jsonify({'success': False, 'error': "Hisobot oyi va pochta kiritilishi shart!"}), 400
-        delete_station_override(db_path, ym, email, email_map)
+        delete_station_override(db_path, ym, email, day_str=day_str, email_map=email_map)
         invalidate_stats_cache()
         db_stats = get_all_stats_from_db(db_path, email_map)
         if db_stats:

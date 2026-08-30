@@ -92,15 +92,24 @@ def init_db(db_path):
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_tickets_station ON tickets(station_name)')
 
     # 6. Station Manual Overrides Table
+    try:
+        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='station_overrides'")
+        t_info = cursor.fetchone()
+        if t_info and 'PRIMARYKEY(ym,day_str,email)' not in str(t_info[0]).replace(' ', ''):
+            cursor.execute("DROP TABLE IF EXISTS station_overrides")
+    except Exception as e:
+        pass
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS station_overrides (
             ym TEXT NOT NULL,
+            day_str TEXT NOT NULL DEFAULT 'ALL',
             email TEXT NOT NULL,
             station_name TEXT,
             override_tickets INTEGER,
             override_summa REAL,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY(ym, email)
+            PRIMARY KEY(ym, day_str, email)
         )
     ''')
 
@@ -284,9 +293,9 @@ def rebuild_aggregates_from_tickets(db_path, email_map):
     finally:
         conn.close()
 
-def save_station_override(db_path, ym, email, override_tickets, override_summa=None, email_map=None):
+def save_station_override(db_path, ym, email, override_tickets, override_summa=None, day_str='ALL', email_map=None):
     """
-    Saves or updates a manual admin override for a specific station and month.
+    Saves or updates a manual admin override for a specific station, month, and optional day.
     Recalculates station monthly stats, share percentages, and monthly summary in SQLite.
     """
     init_db(db_path)
@@ -295,6 +304,7 @@ def save_station_override(db_path, ym, email, override_tickets, override_summa=N
 
     try:
         ym_clean = str(ym).strip().strip("'").strip('"')
+        day_clean = str(day_str or 'ALL').strip()
         email_clean = str(email).strip().lower()
         st_name = email_map.get(email_clean, {}).get('station', email_clean) if email_map else email_clean
 
@@ -302,14 +312,14 @@ def save_station_override(db_path, ym, email, override_tickets, override_summa=N
         s_val = float(override_summa) if override_summa is not None and str(override_summa).strip() != '' else None
 
         cursor.execute('''
-            INSERT INTO station_overrides (ym, email, station_name, override_tickets, override_summa, updated_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(ym, email) DO UPDATE SET
+            INSERT INTO station_overrides (ym, day_str, email, station_name, override_tickets, override_summa, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(ym, day_str, email) DO UPDATE SET
                 override_tickets = excluded.override_tickets,
                 override_summa = excluded.override_summa,
                 station_name = excluded.station_name,
                 updated_at = CURRENT_TIMESTAMP
-        ''', (ym_clean, email_clean, st_name, t_val, s_val))
+        ''', (ym_clean, day_clean, email_clean, st_name, t_val, s_val))
         conn.commit()
     except Exception as ex:
         print("[DB] save_station_override error:", ex)
@@ -325,7 +335,7 @@ def get_station_overrides(db_path):
     conn = get_db_connection(db_path)
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT ym, email, station_name, override_tickets, override_summa, updated_at FROM station_overrides ORDER BY ym DESC, station_name ASC")
+        cursor.execute("SELECT ym, COALESCE(day_str, 'ALL') as day_str, email, station_name, override_tickets, override_summa, updated_at FROM station_overrides ORDER BY ym DESC, day_str ASC, station_name ASC")
         rows = [dict(r) for r in cursor.fetchall()]
         conn.close()
         return rows
@@ -334,14 +344,15 @@ def get_station_overrides(db_path):
         conn.close()
         return []
 
-def delete_station_override(db_path, ym, email, email_map=None):
+def delete_station_override(db_path, ym, email, day_str='ALL', email_map=None):
     """Deletes an active admin override and rebuilds raw stats."""
     init_db(db_path)
     conn = get_db_connection(db_path)
     cursor = conn.cursor()
     try:
         ym_clean = str(ym).strip().strip("'").strip('"')
-        cursor.execute("DELETE FROM station_overrides WHERE (ym = ? OR ym = ?) AND LOWER(TRIM(email)) = ?", (ym, ym_clean, email.strip().lower()))
+        day_clean = str(day_str or 'ALL').strip()
+        cursor.execute("DELETE FROM station_overrides WHERE (ym = ? OR ym = ?) AND (COALESCE(day_str, 'ALL') = ? OR ? = '' OR ? = 'ALL') AND LOWER(TRIM(email)) = ?", (ym, ym_clean, day_clean, day_clean, day_clean, email.strip().lower()))
         conn.commit()
     except Exception as ex:
         print("[DB] delete_station_override error:", ex)

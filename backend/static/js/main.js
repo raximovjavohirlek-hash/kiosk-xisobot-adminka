@@ -494,6 +494,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             fetchStats();
             if (user.role === 'admin') {
+                populateOverrideDropdowns();
                 fetchUsers();
                 fetchOverrides();
             }
@@ -765,35 +766,110 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ==========================================
-    // MANUAL STATION SALES OVERRIDE LOGIC
+    // MANUAL STATION SALES OVERRIDE LOGIC (MONTH + DAY)
     // ==========================================
     const overrideForm = document.getElementById('overrideForm');
     const overrideYmSelect = document.getElementById('overrideYmSelect');
+    const overrideDaySelect = document.getElementById('overrideDaySelect');
     const overrideEmailSelect = document.getElementById('overrideEmailSelect');
     const overrideTicketsInput = document.getElementById('overrideTicketsInput');
     const overrideSummaInput = document.getElementById('overrideSummaInput');
     const overridesTableBody = document.getElementById('overridesTableBody');
 
+    const KIOSK_STATIONS_LIST = [
+        { email: "toshkent.shimoliykiosk@railway.uz", name: "Тошкент Марказий" },
+        { email: "kiosk@axonlogic.uz", name: "Тошкент Жанубий" },
+        { email: "samarqandkiosk@railway.uz", name: "Самарқанд" },
+        { email: "urganchkiosk@railway.uz", name: "Урганч" },
+        { email: "khivakiosk@railway.uz", name: "Хива" },
+        { email: "navoiykiosk@railway.uz", name: "Навои" },
+        { email: "buxorokiosk@railway.uz", name: "Бухоро" },
+        { email: "qongirotkiosk@railway.uz", name: "Қўнғирод" },
+        { email: "nukuskiosk@railway.uz", name: "Нукус" },
+        { email: "andijonkiosk@railway.uz", name: "Андижон" },
+        { email: "qoqonkiosk@railway.uz", name: "Қўқон" },
+        { email: "margilonkiosk@railway.uz", name: "Марғилон" },
+        { email: "namangankiosk@railway.uz", name: "Наманган" },
+        { email: "termizkiosk@railway.uz", name: "Термиз" },
+        { email: "qarshikiosk@railway.uz", name: "Қарши" }
+    ];
+
+    function populateDaysForSelectedMonth() {
+        if (!overrideDaySelect) return;
+        const ym = overrideYmSelect ? overrideYmSelect.value : '2026-08';
+        const currentSelected = overrideDaySelect.value;
+        overrideDaySelect.innerHTML = '<option value="ALL">Barcha kunlar (Oylik jami)</option>';
+
+        if (ym && ym.includes('-')) {
+            const parts = ym.split('-');
+            const year = intVal(parts[0]);
+            const month = intVal(parts[1]);
+            if (year > 2000 && month >= 1 && month <= 12) {
+                const daysInMonth = new Date(year, month, 0).getDate();
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const dStr = String(d).padStart(2, '0');
+                    const mStr = String(month).padStart(2, '0');
+                    const dateFormatted = `${dStr}.${mStr}.${year}`;
+                    const opt = document.createElement('option');
+                    opt.value = dateFormatted;
+                    opt.textContent = `${dateFormatted} - (${d}-kun)`;
+                    overrideDaySelect.appendChild(opt);
+                }
+            }
+        }
+        if (currentSelected) overrideDaySelect.value = currentSelected;
+    }
+
+    if (overrideYmSelect) {
+        overrideYmSelect.addEventListener('change', () => {
+            populateDaysForSelectedMonth();
+        });
+    }
+
     function populateOverrideDropdowns(stats) {
         if (overrideYmSelect) {
             overrideYmSelect.innerHTML = '';
-            const availableMonths = stats ? (stats.available_months || []) : [];
+            let availableMonths = (stats && stats.available_months && stats.available_months.length > 0)
+                ? stats.available_months
+                : (fullBackendStats && fullBackendStats.available_months && fullBackendStats.available_months.length > 0)
+                    ? fullBackendStats.available_months
+                    : [
+                        { code: '2026-08', name: 'Avgust 2026' },
+                        { code: '2026-07', name: 'Iyul 2026' },
+                        { code: '2026-06', name: 'Iyun 2026' },
+                        { code: '2026-05', name: 'May 2026' },
+                        { code: '2026-04', name: 'Aprel 2026' },
+                        { code: '2026-03', name: 'Mart 2026' },
+                        { code: '2026-02', name: 'Fevral 2026' },
+                        { code: '2026-01', name: 'Yanvar 2026' }
+                    ];
+
             availableMonths.forEach(m => {
                 const opt = document.createElement('option');
                 opt.value = m.code;
                 opt.textContent = m.name;
                 overrideYmSelect.appendChild(opt);
             });
+            populateDaysForSelectedMonth();
         }
 
-        if (overrideEmailSelect && currentMappings) {
+        if (overrideEmailSelect) {
             overrideEmailSelect.innerHTML = '';
-            Object.entries(currentMappings).forEach(([email, meta]) => {
-                const opt = document.createElement('option');
-                opt.value = email;
-                opt.textContent = `${meta.station || email} (${email})`;
-                overrideEmailSelect.appendChild(opt);
-            });
+            if (currentMappings && Object.keys(currentMappings).length > 0) {
+                Object.entries(currentMappings).forEach(([email, meta]) => {
+                    const opt = document.createElement('option');
+                    opt.value = email;
+                    opt.textContent = `${meta.station || email} (${email})`;
+                    overrideEmailSelect.appendChild(opt);
+                });
+            } else {
+                KIOSK_STATIONS_LIST.forEach(st => {
+                    const opt = document.createElement('option');
+                    opt.value = st.email;
+                    opt.textContent = `${st.name} (${st.email})`;
+                    overrideEmailSelect.appendChild(opt);
+                });
+            }
         }
     }
 
@@ -815,20 +891,25 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!overridesTableBody) return;
         overridesTableBody.innerHTML = '';
         if (overrides.length === 0) {
-            overridesTableBody.innerHTML = '<tr><td colspan="6" class="empty-row">Qo\'lda kiritilgan tahrirlar yo\'q</td></tr>';
+            overridesTableBody.innerHTML = '<tr><td colspan="7" class="empty-row">Qo\'lda kiritilgan tahrirlar yo\'q</td></tr>';
             return;
         }
 
         overrides.forEach(ov => {
             const tr = document.createElement('tr');
+            const dayBadge = (!ov.day_str || ov.day_str === 'ALL')
+                ? '<span class="card-badge" style="background: rgba(255,255,255,0.08);">Barcha kunlar (Oylik)</span>'
+                : `<strong style="color: var(--accent-cyan);"><i class="fa-solid fa-calendar-day"></i> ${ov.day_str}</strong>`;
+
             tr.innerHTML = `
                 <td><strong>${ov.ym}</strong></td>
+                <td>${dayBadge}</td>
                 <td>${ov.station_name || ov.email}</td>
                 <td><span class="number-cell-tickets">${ov.override_tickets !== null && ov.override_tickets !== undefined ? ov.override_tickets.toLocaleString('uz-UZ') + ' ta' : 'Asl'}</span></td>
                 <td><span class="number-cell-summa">${ov.override_summa !== null && ov.override_summa !== undefined ? ov.override_summa.toLocaleString('uz-UZ') + " so'm" : 'Asl'}</span></td>
                 <td style="font-size: 12px; opacity: 0.8;">${ov.updated_at || '-'}</td>
                 <td>
-                    <button class="btn-icon-only btn-sm" style="color: var(--accent-rose);" onclick="deleteOverride('${ov.ym}', '${ov.email}')" title="Tahrirni bekor qilish">
+                    <button class="btn-icon-only btn-sm" style="color: var(--accent-rose);" onclick="deleteOverride('${ov.ym}', '${ov.email}', '${ov.day_str || 'ALL'}')" title="Tahrirni bekor qilish">
                         <i class="fa-solid fa-trash-can"></i>
                     </button>
                 </td>
@@ -837,12 +918,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    window.deleteOverride = function(ym, email) {
-        if (!confirm(`${ym} oyi uchun ushbu kassa tahririni bekor qilmoqchimisiz?`)) return;
+    window.deleteOverride = function(ym, email, day_str = 'ALL') {
+        const desc = (day_str && day_str !== 'ALL') ? `${day_str} sanasi` : `${ym} oyi`;
+        if (!confirm(`${desc} uchun ushbu kassa tahririni bekor qilmoqchimisiz?`)) return;
         fetch(getApiUrl('/api/admin/overrides'), {
             method: 'DELETE',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ ym, email })
+            body: JSON.stringify({ ym, email, day_str })
         })
         .then(res => res.json())
         .then(data => {
@@ -861,6 +943,7 @@ document.addEventListener('DOMContentLoaded', () => {
         overrideForm.addEventListener('submit', (e) => {
             e.preventDefault();
             const ym = overrideYmSelect ? overrideYmSelect.value : '';
+            const day_str = overrideDaySelect ? overrideDaySelect.value : 'ALL';
             const email = overrideEmailSelect ? overrideEmailSelect.value : '';
             const tickets = overrideTicketsInput ? overrideTicketsInput.value : '';
             const summa = overrideSummaInput ? overrideSummaInput.value : '';
@@ -873,7 +956,7 @@ document.addEventListener('DOMContentLoaded', () => {
             fetch(getApiUrl('/api/admin/override-station'), {
                 method: 'POST',
                 headers: authHeaders({ 'Content-Type': 'application/json' }),
-                body: JSON.stringify({ ym, email, tickets, summa })
+                body: JSON.stringify({ ym, day_str, email, tickets, summa })
             })
             .then(res => res.json())
             .then(data => {
