@@ -598,72 +598,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    function performAdminLogin() {
-        const pwd = adminPasswordInput ? adminPasswordInput.value.trim() : '';
-        if (!pwd) {
-            if (adminLoginError) {
-                adminLoginError.textContent = 'Parolni kiriting!';
-                adminLoginError.style.display = 'block';
-            }
-            return;
-        }
-
-        fetch(getApiUrl('/api/admin/login'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password: pwd })
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.success) {
-                isAdminLoggedIn = true;
-                sessionStorage.setItem('kiosk-admin-auth', 'true');
-                if (data.token) sessionStorage.setItem('kiosk-admin-token', data.token);
-                updateAdminAuthStateUI();
-                closeAdminModal();
-
-                tabBtns.forEach(b => b.classList.remove('active'));
-                tabContents.forEach(c => c.classList.remove('active'));
-
-                const adminBtn = document.querySelector('.tab-btn[data-tab="tab-admin"]');
-                const adminTab = document.getElementById('tab-admin');
-                if (adminBtn) adminBtn.classList.add('active');
-                if (adminTab) adminTab.classList.add('active');
-                loadTokenData();
-            } else {
-                if (adminLoginError) {
-                    adminLoginError.textContent = data.error || "Parol noto'g'ri!";
-                    adminLoginError.style.display = 'block';
-                }
-            }
-        })
-        .catch(err => {
-            if (adminLoginError) {
-                adminLoginError.textContent = 'Xatolik yuz berdi!';
-                adminLoginError.style.display = 'block';
-            }
-        });
-    }
-
-    if (submitAdminLoginBtn) submitAdminLoginBtn.addEventListener('click', performAdminLogin);
-    if (adminPasswordInput) {
-        adminPasswordInput.addEventListener('keyup', (e) => {
-            if (e.key === 'Enter') performAdminLogin();
-        });
-    }
-
-    // Tab Switching with Admin Protection
+    // Tab Switching Logic
     const tabBtns = document.querySelectorAll('.tab-btn');
     const tabContents = document.querySelectorAll('.tab-content');
 
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             const targetTabName = btn.getAttribute('data-tab');
+
             if (targetTabName === 'tab-admin' && !isCurrentUserAdmin()) {
-                return;
-            }
-            if (targetTabName === 'tab-admin' && !isAdminLoggedIn) {
-                openAdminModal();
+                showToast('warning', 'Ruxsat Etilmagan', 'Admin bo\'limiga kirish uchun administrator roli talab etiladi.');
                 return;
             }
 
@@ -675,7 +619,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (targetTab) {
                 targetTab.classList.add('active');
                 if (targetTabName === 'tab-admin') {
-                    loadTokenData();
+                    fetchUsers();
+                    fetchOverrides();
+                    fetchUploadLogs();
                 }
             }
         });
