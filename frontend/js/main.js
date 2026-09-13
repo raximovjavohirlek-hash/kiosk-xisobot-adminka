@@ -1,3 +1,8 @@
+function intVal(val) {
+    if (val === null || val === undefined) return 0;
+    const n = parseInt(val, 10);
+    return isNaN(n) ? 0 : n;
+}
 
 function formatMln(num) {
     if (!num || isNaN(num)) return '0 mln';
@@ -511,22 +516,29 @@ document.addEventListener('DOMContentLoaded', () => {
             return false;
         }
 
+        let user;
         try {
-            const user = JSON.parse(userStr);
-            if (systemLoginGateModal) systemLoginGateModal.style.display = 'none';
-            if (appContainer) appContainer.style.display = 'block';
+            user = JSON.parse(userStr);
+        } catch (e) {
+            handleUnauthorizedAccess("Avtorizatsiya ma'lumotlari yaroqsiz.");
+            return false;
+        }
 
-            if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+        if (systemLoginGateModal) systemLoginGateModal.style.display = 'none';
+        if (appContainer) appContainer.style.display = 'block';
 
-            const userRoleBadge = document.getElementById('userRoleBadge');
-            if (userRoleBadge) {
-                userRoleBadge.innerHTML = `<i class="fa-solid fa-user-shield"></i> ${user.name || user.username} (${user.role === 'admin' ? 'Admin' : 'Foydalanuvchi'})`;
-            }
+        if (logoutBtn) logoutBtn.style.display = 'inline-flex';
 
-            if (adminTabBtn) {
-                adminTabBtn.style.display = (user.role === 'admin') ? 'inline-flex' : 'none';
-            }
+        const userRoleBadge = document.getElementById('userRoleBadge');
+        if (userRoleBadge) {
+            userRoleBadge.innerHTML = `<i class="fa-solid fa-user-shield"></i> ${user.name || user.username} (${user.role === 'admin' ? 'Admin' : 'Foydalanuvchi'})`;
+        }
 
+        if (adminTabBtn) {
+            adminTabBtn.style.display = (user.role === 'admin') ? 'inline-flex' : 'none';
+        }
+
+        try {
             fetchStats();
             if (user.role === 'admin') {
                 populateOverrideDropdowns();
@@ -534,11 +546,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 fetchOverrides();
                 fetchMappings();
             }
-            return true;
-        } catch (e) {
-            handleUnauthorizedAccess();
-            return false;
+        } catch (err) {
+            console.error('[Dashboard Init Error]:', err);
         }
+        return true;
     }
 
     // System Mandatory Login Form Handler
@@ -601,6 +612,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     if (systemLoginGateModal) systemLoginGateModal.style.display = 'none';
                     if (systemLoginError) systemLoginError.style.display = 'none';
+                    const appContainer = document.getElementById('appContainer');
+                    if (appContainer) appContainer.style.display = 'block';
 
                     showToast('success', 'Xush Kelibsiz!', data.message || 'Tizimga kirdingiz');
                     checkAppAuthentication();
@@ -844,8 +857,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (ym && ym.includes('-')) {
             const parts = ym.split('-');
-            const year = intVal(parts[0]);
-            const month = intVal(parts[1]);
+            const year = parseInt(parts[0], 10) || 2026;
+            const month = parseInt(parts[1], 10) || 1;
             if (year > 2000 && month >= 1 && month <= 12) {
                 const daysInMonth = new Date(year, month, 0).getDate();
                 for (let d = 1; d <= daysInMonth; d++) {
