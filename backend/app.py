@@ -1530,7 +1530,8 @@ def auth_login():
     users = load_users()
     for u in users:
         u_name = str(u.get('username', '')).strip().lower()
-        if u_name == username:
+        u_region = str(u.get('region', '')).strip().lower()
+        if u_name == username or (u_region and u_region == username) or (username == 'admin' and u.get('role') == 'admin'):
             if not u.get('is_active', True):
                 record_login_attempt(client_ip, username, success=False)
                 add_audit_log('login_fail_inactive', u.get('username', username), detail='account_deactivated', success=False)
