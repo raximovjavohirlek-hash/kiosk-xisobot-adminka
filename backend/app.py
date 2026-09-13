@@ -38,9 +38,9 @@ app = Flask(__name__)
 
 ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
     'ALLOWED_ORIGINS',
-    'http://localhost:5050,http://127.0.0.1:5050,https://kiosk-xisobot-adminka.pages.dev'
+    'http://localhost:5050,http://127.0.0.1:5050,https://kiosk-xisobot-adminka.pages.dev,https://kiosk-hisobot.pages.dev'
 ).split(',') if o.strip()]
-CORS(app, origins=ALLOWED_ORIGINS, supports_credentials=True)
+CORS(app, origins=ALLOWED_ORIGINS + [r'https://.*\.pages\.dev'], supports_credentials=True)
 
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or os.urandom(32).hex()
 app.config['UPLOAD_FOLDER'] = os.path.dirname(os.path.abspath(__file__))
@@ -184,6 +184,12 @@ DEFAULT_KIOSK_ACCOUNTS = [
     {"username": "qarshikiosk", "name": "Qarshi Kassa", "region": "qarshikiosk@railway.uz"},
 ]
 
+DEFAULT_KIOSK_PASSWORD_HASH = 'pbkdf2:sha256:50000$F3DPOXbp90zU3jrF$efcb8c5eda73743d0d7ee3ccac52f1a171435b5d4b23a8d09f9c0fb07dbc58c3'
+DEFAULT_ADMIN_PASSWORD_HASH = 'pbkdf2:sha256:50000$BoNlFSTsTUZnrLyl$6b704a61be143b5f254482f8659f6edc792a3b443c830854a830ddd80286dae7'
+
+def hash_password(password):
+    return generate_password_hash(password, method='pbkdf2:sha256:50000')
+
 def load_users():
     users = None
     if os.path.exists(USERS_FILE):
@@ -199,9 +205,13 @@ def load_users():
     has_master = any(str(u.get('role', '')).strip().lower() == 'admin' for u in users)
     if not has_master:
         master_pass = app.config.get('ADMIN_PASSWORD', 'Javo!QAZ')
+        if master_pass == 'Javo!QAZ':
+            hashed_master = DEFAULT_ADMIN_PASSWORD_HASH
+        else:
+            hashed_master = hash_password(master_pass)
         users.insert(0, {
             "username": "Javohir",
-            "password": generate_password_hash(master_pass, method='pbkdf2:sha256'),
+            "password": hashed_master,
             "name": "Bosh Administrator (Javohir)",
             "role": "admin",
             "region": None,
@@ -217,7 +227,7 @@ def load_users():
         if u_kiosk not in existing_usernames:
             users.append({
                 "username": k['username'],
-                "password": generate_password_hash("Kiosk2026!", method='pbkdf2:sha256'),
+                "password": DEFAULT_KIOSK_PASSWORD_HASH,
                 "name": k['name'],
                 "role": "user",
                 "region": k['region'],
@@ -233,7 +243,7 @@ def load_users():
             migrated = True
         pw = u.get('password', '')
         if pw and not is_hashed_password(pw):
-            u['password'] = generate_password_hash(pw, method='pbkdf2:sha256')
+            u['password'] = hash_password(pw)
             migrated = True
 
     if migrated:
@@ -247,6 +257,11 @@ def verify_user_password(stored_password, candidate):
     if is_hashed_password(stored_password):
         return check_password_hash(stored_password, candidate)
     return stored_password == candidate
+
+try:
+    load_users()
+except Exception as _e:
+    print("[Users] Initial startup load error:", _e)
 
 def save_users(users):
     with open(USERS_FILE, 'w', encoding='utf-8') as f:
@@ -1603,7 +1618,7 @@ def manage_users():
 
         users.append({
             'username': username,
-            'password': generate_password_hash(password, method='pbkdf2:sha256'),
+            'password': hash_password(password),
             'name': name,
             'role': role,
             'region': region,
@@ -1661,7 +1676,7 @@ def update_user(username):
 
     if 'password' in data and str(data['password']).strip():
         new_pass = str(data['password']).strip()
-        target_user['password'] = generate_password_hash(new_pass, method='pbkdf2:sha256')
+        target_user['password'] = hash_password(new_pass)
         add_audit_log('password_reset', admin_user, detail=f"password reset for {username_clean}")
 
     save_users(users)

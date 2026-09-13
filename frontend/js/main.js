@@ -586,7 +586,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password })
             })
-            .then(res => res.json())
+            .then(res => {
+                if (!res.ok && res.status >= 500) {
+                    throw new Error("Server vaqtincha javob bermayapti. Render bepul serveri uyg'onayotgan bo'lishi mumkin, 15-20 soniya kuting.");
+                }
+                return res.json();
+            })
             .then(data => {
                 if (data.success && data.token) {
                     localStorage.setItem('auth_token', data.token);
@@ -608,7 +613,12 @@ document.addEventListener('DOMContentLoaded', () => {
             })
             .catch(err => {
                 if (systemLoginError) {
-                    systemLoginError.textContent = "Ulanishda xatolik: " + err;
+                    const msg = String(err && err.message ? err.message : err);
+                    if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+                        systemLoginError.textContent = "Server uyg'onmoqda (Render free tier). Iltimos, 15-20 soniya kutib qayta 'Kirish' tugmasini bosing.";
+                    } else {
+                        systemLoginError.textContent = "Ulanishda xatolik: " + msg;
+                    }
                     systemLoginError.style.display = 'block';
                 }
             })
