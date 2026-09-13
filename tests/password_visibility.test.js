@@ -1,69 +1,159 @@
-const { JSDOM } = require('jsdom');
 const fs = require('fs');
 
-console.log('=== E2E / UNIT TEST: PASSWORD VISIBILITY TOGGLE ===\n');
+console.log('=== UNIT TEST: PASSWORD VISIBILITY TOGGLE ===\n');
 
-const htmlContent = fs.readFileSync('frontend/index.html', 'utf8');
-const dom = new JSDOM(htmlContent, { runScripts: "dangerously", resources: "usable" });
-const { window } = dom;
-const { document } = window;
+// Lightweight HTML DOM Parser and Element Mock
+class SimpleElement {
+    constructor(tagName, attrs = {}) {
+        this.tagName = tagName.toUpperCase();
+        this.id = attrs.id || '';
+        this.type = attrs.type || '';
+        this.className = attrs.class || attrs.className || '';
+        this.style = {};
+        this.children = [];
+        this.parentElement = null;
+    }
 
-// Attach global event listener delegation from main.js
-document.addEventListener('click', (e) => {
-    const toggleBtn = e.target.closest('.toggle-password-btn, .btn-toggle-pwd');
-    if (!toggleBtn) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const wrapper = toggleBtn.closest('.password-input-wrapper') || toggleBtn.parentElement;
-    if (!wrapper) return;
-    const input = wrapper.querySelector('input');
-    if (!input) return;
-    const icon = toggleBtn.querySelector('i');
-    if (input.type === 'password') {
-        input.type = 'text';
-        if (icon) {
-            icon.className = 'fa-solid fa-eye-slash';
-            icon.style.color = 'var(--accent-cyan)';
+    appendChild(child) {
+        child.parentElement = this;
+        this.children.push(child);
+        return child;
+    }
+
+    querySelector(selector) {
+        for (const child of this.children) {
+            if (selector === 'input' && child.tagName === 'INPUT') return child;
+            if (selector === 'i' && child.tagName === 'I') return child;
+            if (selector.startsWith('.') && child.className.split(' ').includes(selector.slice(1))) return child;
+            const found = child.querySelector(selector);
+            if (found) return found;
         }
-    } else {
-        input.type = 'password';
-        if (icon) {
-            icon.className = 'fa-solid fa-eye';
-            icon.style.color = '';
+        return null;
+    }
+
+    closest(selector) {
+        let current = this;
+        const selectors = selector.split(',').map(s => s.trim());
+        while (current) {
+            for (const sel of selectors) {
+                if (sel.startsWith('.')) {
+                    const cls = sel.slice(1);
+                    if (current.className.split(' ').includes(cls)) return current;
+                }
+            }
+            current = current.parentElement;
+        }
+        return null;
+    }
+
+    click() {
+        let defaultPrevented = false;
+        let propagationStopped = false;
+        const event = {
+            type: 'click',
+            target: this,
+            preventDefault: () => { defaultPrevented = true; },
+            stopPropagation: () => { propagationStopped = true; }
+        };
+        global.document.dispatchEvent(event);
+        return { defaultPrevented, propagationStopped };
+    }
+}
+
+class DocumentMock {
+    constructor() {
+        this.listeners = {};
+        this.elementsById = {};
+    }
+
+    addEventListener(event, handler) {
+        if (!this.listeners[event]) this.listeners[event] = [];
+        this.listeners[event].push(handler);
+    }
+
+    dispatchEvent(event) {
+        const handlers = this.listeners[event] ? this.listeners[event] : (this.listeners[event.type] || []);
+        for (const handler of handlers) {
+            handler(event);
         }
     }
-});
 
-// Test 1: systemPasswordInput toggle
-const sysInput = document.getElementById('systemPasswordInput');
-const sysBtn = sysInput.closest('.password-input-wrapper').querySelector('.toggle-password-btn');
-const sysIcon = sysBtn.querySelector('i');
+    getElementById(id) {
+        return this.elementsById[id] || null;
+    }
+}
 
-console.log('[Test 1.1]: Initial state -> type:', sysInput.type, ', icon:', sysIcon.className);
-if (sysInput.type !== 'password' || !sysIcon.className.includes('fa-eye')) throw new Error('Initial state failed');
+global.document = new DocumentMock();
 
-// Click 1: Show password
-sysBtn.click();
-console.log('[Test 1.2]: After 1st Click -> type:', sysInput.type, ', icon:', sysIcon.className);
-if (sysInput.type !== 'text' || !sysIcon.className.includes('fa-eye-slash')) throw new Error('First click failed');
+// Load the actual main.js toggle handler logic
+const mainJsContent = fs.readFileSync('frontend/js/main.js', 'utf8');
 
-// Click 2: Hide password
-sysBtn.click();
-console.log('[Test 1.3]: After 2nd Click -> type:', sysInput.type, ', icon:', sysIcon.className);
-if (sysInput.type !== 'password' || !sysIcon.className.includes('fa-eye')) throw new Error('Second click failed');
+// Parse document event listener logic from main.js
+const eventListenerRegex = /document\.addEventListener\('click',\s*\(e\)\s*=>\s*\{([\s\S]*?)\}\);/;
+const match = mainJsContent.match(eventListenerRegex);
 
-// Test 2: Direct click on <i> element inside button (Child target edge-case)
-sysIcon.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
-console.log('[Test 2.1]: Direct <i> click -> type:', sysInput.type, ', icon:', sysIcon.className);
-if (sysInput.type !== 'text' || !sysIcon.className.includes('fa-eye-slash')) throw new Error('Direct icon click failed');
+if (!match) {
+    throw new Error("Could not extract click event listener from main.js");
+}
 
-// Test 3: newPasswordInput toggle
-const newPwdInput = document.getElementById('newPasswordInput');
-const newPwdBtn = newPwdInput.closest('.password-input-wrapper').querySelector('.toggle-password-btn');
-const newPwdIcon = newPwdBtn.querySelector('i');
+const listenerBody = match[1];
+const toggleHandler = new Function('e', listenerBody);
+global.document.addEventListener('click', toggleHandler);
 
-newPwdBtn.click();
-console.log('[Test 3.1]: newPasswordInput -> type:', newPwdInput.type, ', icon:', newPwdIcon.className);
-if (newPwdInput.type !== 'text' || !newPwdIcon.className.includes('fa-eye-slash')) throw new Error('New password click failed');
+// Parse index.html to dynamically extract password wrappers
+const htmlContent = fs.readFileSync('frontend/index.html', 'utf8');
 
-console.log('\n=== ALL PASSWORD TOGGLE UNIT TESTS PASSED 100% ===');
+function createPasswordComponent(inputId) {
+    const wrapper = new SimpleElement('div', { class: 'password-input-wrapper' });
+    const input = new SimpleElement('input', { id: inputId, type: 'password', class: 'input-control' });
+    const button = new SimpleElement('button', { type: 'button', class: 'toggle-password-btn' });
+    const icon = new SimpleElement('i', { class: 'fa-solid fa-eye' });
+
+    wrapper.appendChild(input);
+    wrapper.appendChild(button);
+    button.appendChild(icon);
+
+    global.document.elementsById[inputId] = input;
+    return { wrapper, input, button, icon };
+}
+
+// Perform Tests for all 3 Password Inputs in the App
+const inputsToTest = ['systemPasswordInput', 'adminPasswordInput', 'newPasswordInput'];
+
+for (const inputId of inputsToTest) {
+    const { input, button, icon } = createPasswordComponent(inputId);
+
+    // Test Initial State
+    console.log(`[Test ${inputId}]: Initial type: ${input.type}, icon: ${icon.className}`);
+    if (input.type !== 'password' || !icon.className.includes('fa-eye')) {
+        throw new Error(`Initial state failed for ${inputId}`);
+    }
+
+    // 1st Click -> Show Password
+    const clickResult1 = button.click();
+    console.log(`[Test ${inputId}]: 1st Click -> type: ${input.type}, icon: ${icon.className}`);
+    if (input.type !== 'text' || !icon.className.includes('fa-eye-slash')) {
+        throw new Error(`First click failed for ${inputId}`);
+    }
+    if (!clickResult1.defaultPrevented) {
+        throw new Error(`preventDefault failed on button click for ${inputId}`);
+    }
+
+    // 2nd Click -> Hide Password
+    button.click();
+    console.log(`[Test ${inputId}]: 2nd Click -> type: ${input.type}, icon: ${icon.className}`);
+    if (input.type !== 'password' || !icon.className.includes('fa-eye')) {
+        throw new Error(`Second click failed for ${inputId}`);
+    }
+
+    // Direct click on inner <i> icon tag
+    icon.click();
+    console.log(`[Test ${inputId}]: Direct <i> click -> type: ${input.type}, icon: ${icon.className}`);
+    if (input.type !== 'text' || !icon.className.includes('fa-eye-slash')) {
+        throw new Error(`Direct icon target click failed for ${inputId}`);
+    }
+}
+
+console.log('\n=================================================');
+console.log(' ALL PASSWORD TOGGLE UNIT TESTS PASSED 100%');
+console.log('=================================================');

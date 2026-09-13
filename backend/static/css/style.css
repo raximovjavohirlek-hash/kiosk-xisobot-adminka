@@ -2055,6 +2055,44 @@ body.tv-mode .nav-tabs-bar {
         height: 18px !important;
         font-size: 8.5px !important;
     }
+
+/* Password Input Wrapper & Dynamic Eye Toggle Button */
+.password-input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.toggle-password-btn {
+    position: absolute;
+    right: 10px;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 6px;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 5;
+    pointer-events: auto;
+    transition: color 0.2s ease, transform 0.1s ease;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.toggle-password-btn:hover {
+    color: var(--accent-cyan);
+}
+
+.toggle-password-btn:active {
+    transform: scale(0.92);
+}
+
+.toggle-password-btn i {
+    pointer-events: none;
 }
 
 
