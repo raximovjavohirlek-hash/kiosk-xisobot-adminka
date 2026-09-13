@@ -47,6 +47,30 @@ function authHeaders(extra = {}) {
     return token ? { ...extra, 'Authorization': `Bearer ${token}` } : extra;
 }
 
+async function downloadWithAuth(url, fallbackFilename) {
+    const resp = await fetch(url, { headers: authHeaders() });
+    if (!resp.ok) {
+        let message = "Faylni yuklab bo'lmadi.";
+        try {
+            const errData = await resp.json();
+            if (errData && errData.error) message = errData.error;
+        } catch (e) {}
+        throw new Error(message);
+    }
+    const disposition = resp.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+    const filename = match ? decodeURIComponent(match[1]) : fallbackFilename;
+    const blob = await resp.blob();
+    const blobUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(blobUrl);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     let trendChartInstance = null;
     let comparisonChartInstance = null;
@@ -187,10 +211,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (exportStationExcelBtn) {
-        exportStationExcelBtn.addEventListener('click', () => {
+        exportStationExcelBtn.addEventListener('click', async () => {
             if (!currentActiveModalStation) return;
             showToast('info', 'Excel Yuklanmoqda...', `${currentActiveModalStation} kassa (${currentSelectedModalMonth}) hisoboti yuklanmoqda`);
-            window.location.href = getApiUrl(`/api/export-station-excel/${encodeURIComponent(currentActiveModalStation)}?month=${currentSelectedModalMonth}`);
+            try {
+                const url = getApiUrl(`/api/export-station-excel/${encodeURIComponent(currentActiveModalStation)}?month=${currentSelectedModalMonth}`);
+                await downloadWithAuth(url, `${currentActiveModalStation}.xlsx`);
+            } catch (err) {
+                showToast('error', 'Xatolik', err.message || "Faylni yuklab bo'lmadi.");
+            }
         });
     }
     if (stationDetailModal) {
@@ -457,8 +486,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (systemLoginGateModal) systemLoginGateModal.style.display = 'flex';
 
         if (systemLoginError) {
-            systemLoginError.textContent = msg || "Sessiya muddati tugadi yoki avtorizatsiya qilinmagan. Login va parol kiriting.";
-            systemLoginError.style.display = 'block';
+            if (msg) {
+                systemLoginError.textContent = msg;
+                systemLoginError.style.display = 'block';
+            } else {
+                systemLoginError.style.display = 'none';
+            }
         }
     }
 
@@ -466,6 +499,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const token = localStorage.getItem('auth_token') || sessionStorage.getItem('kiosk-admin-token');
         const userStr = localStorage.getItem('auth_user');
         const systemLoginGateModal = document.getElementById('systemLoginGateModal');
+        const systemLoginError = document.getElementById('systemLoginError');
         const appContainer = document.getElementById('appContainer');
         const logoutBtn = document.getElementById('logoutBtn');
         const adminTabBtn = document.querySelector('.tab-btn[data-tab="tab-admin"]');
@@ -473,6 +507,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!token || !userStr) {
             if (appContainer) appContainer.style.display = 'none';
             if (systemLoginGateModal) systemLoginGateModal.style.display = 'flex';
+            if (systemLoginError) systemLoginError.style.display = 'none';
             return false;
         }
 
@@ -497,10 +532,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 populateOverrideDropdowns();
                 fetchUsers();
                 fetchOverrides();
+                fetchMappings();
             }
             return true;
         } catch (e) {
-            handleUnauthorizedAccess("Foydalanuvchi ma'lumoti xatoga uchradi.");
+            handleUnauthorizedAccess();
             return false;
         }
     }
@@ -512,9 +548,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const systemLoginError = document.getElementById('systemLoginError');
     const systemLoginGateModal = document.getElementById('systemLoginGateModal');
 
+    if (systemUsernameInput) {
+        systemUsernameInput.addEventListener('input', () => {
+            if (systemLoginError) systemLoginError.style.display = 'none';
+        });
+    }
+    if (systemPasswordInput) {
+        systemPasswordInput.addEventListener('input', () => {
+            if (systemLoginError) systemLoginError.style.display = 'none';
+        });
+    }
+
     if (systemLoginForm) {
         systemLoginForm.addEventListener('submit', (e) => {
             e.preventDefault();
+            if (systemLoginError) systemLoginError.style.display = 'none';
+
             const username = systemUsernameInput ? systemUsernameInput.value.trim() : '';
             const password = systemPasswordInput ? systemPasswordInput.value.trim() : '';
 
@@ -631,6 +680,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     fetchUsers();
                     fetchOverrides();
                     fetchUploadLogs();
+                    fetchMappings();
                 }
             }
         });
@@ -701,11 +751,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // Excel Download Action
     const downloadBtn = document.getElementById('downloadBtn');
     if (downloadBtn) {
-        downloadBtn.addEventListener('click', (e) => {
+        downloadBtn.addEventListener('click', async (e) => {
             e.preventDefault();
             const period = currentSelectedPeriod || 'all';
             const downloadUrl = getApiUrl(`/api/download?period=${encodeURIComponent(period)}`);
-            window.location.href = downloadUrl;
+            try {
+                await downloadWithAuth(downloadUrl, `hisobot-${period}.xlsx`);
+            } catch (err) {
+                showToast('error', 'Xatolik', err.message || "Faylni yuklab bo'lmadi.");
+            }
         });
     }
 
@@ -741,29 +795,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
-    // Password Visibility Toggle Logic
-    document.addEventListener('click', (e) => {
-        const toggleBtn = e.target.closest('.toggle-password-btn');
-        if (!toggleBtn) return;
-        const wrapper = toggleBtn.closest('.password-input-wrapper') || toggleBtn.parentElement;
-        if (!wrapper) return;
-        const input = wrapper.querySelector('input');
-        if (!input) return;
-        const icon = toggleBtn.querySelector('i');
-        if (input.type === 'password') {
-            input.type = 'text';
-            if (icon) {
-                icon.className = 'fa-solid fa-eye-slash';
-                icon.style.color = 'var(--accent-cyan)';
-            }
-        } else {
-            input.type = 'password';
-            if (icon) {
-                icon.className = 'fa-solid fa-eye';
-                icon.style.color = '';
-            }
-        }
-    });
+
 
     // ==========================================
     // MANUAL STATION SALES OVERRIDE LOGIC (MONTH + DAY)
@@ -987,7 +1019,11 @@ document.addEventListener('DOMContentLoaded', () => {
             })
             .then(data => {
                 if (data && data.success && data.users) {
-                    usersTableBody.innerHTML = data.users.map(u => `
+                    usersTableBody.innerHTML = data.users.map(u => {
+                        const regionLabel = u.region
+                            ? ((currentMappings[u.region] && currentMappings[u.region].station) || u.region)
+                            : (u.role === 'admin' ? "Barchasi" : "Cheklanmagan");
+                        return `
                         <tr>
                             <td><strong>${u.username}</strong></td>
                             <td>${u.name || '-'}</td>
@@ -996,14 +1032,27 @@ document.addEventListener('DOMContentLoaded', () => {
                                     ${u.role === 'admin' ? 'Administrator' : 'Foydalanuvchi'}
                                 </span>
                             </td>
+                            <td>${regionLabel}</td>
                             <td>
                                 ${u.username !== 'admin' ? `<button class="btn-icon-only btn-sm" style="color:var(--accent-rose); padding: 2px 6px;" title="O'chirish" onclick="deleteUserAccount('${u.username}')"><i class="fa-solid fa-trash"></i></button>` : '<span style="font-size:11px; color:var(--text-secondary);">(Bosh Admin)</span>'}
                             </td>
                         </tr>
-                    `).join('');
+                    `;
+                    }).join('');
                 }
             })
             .catch(err => console.error("fetchUsers error:", err));
+    }
+
+    const newRoleSelect = document.getElementById('newRoleSelect');
+    const newRegionGroup = document.getElementById('newRegionGroup');
+    function updateRegionGroupVisibility() {
+        if (!newRoleSelect || !newRegionGroup) return;
+        newRegionGroup.style.display = (newRoleSelect.value === 'admin') ? 'none' : 'block';
+    }
+    if (newRoleSelect) {
+        newRoleSelect.addEventListener('change', updateRegionGroupVisibility);
+        updateRegionGroupVisibility();
     }
 
     const addUserForm = document.getElementById('addUserForm');
@@ -1014,11 +1063,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const passwordInput = document.getElementById('newPasswordInput');
             const nameInput = document.getElementById('newNameInput');
             const roleSelect = document.getElementById('newRoleSelect');
+            const regionSelect = document.getElementById('newRegionSelect');
 
             const username = usernameInput ? usernameInput.value.trim() : '';
             const password = passwordInput ? passwordInput.value.trim() : '';
             const name = nameInput ? nameInput.value.trim() : '';
             const role = roleSelect ? roleSelect.value : 'user';
+            const region = (role === 'user' && regionSelect) ? regionSelect.value.trim() : '';
 
             if (!username || !password) {
                 showToast('warning', 'Ogohlantirish', 'Login va parol kiritilishi shart!');
@@ -1028,13 +1079,14 @@ document.addEventListener('DOMContentLoaded', () => {
             fetch(getApiUrl('/api/users'), {
                 method: 'POST',
                 headers: authHeaders({ 'Content-Type': 'application/json' }),
-                body: JSON.stringify({ username, password, name, role })
+                body: JSON.stringify({ username, password, name, role, region })
             })
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
                     showToast('success', 'Foydalanuvchi Qo\'shildi', data.message);
                     addUserForm.reset();
+                    updateRegionGroupVisibility();
                     fetchUsers();
                 } else {
                     showToast('error', 'Xatolik', data.error || 'Qo\'shishda xatolik yuz berdi');
@@ -1158,18 +1210,33 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function fetchMappings() {
-        fetch(getApiUrl('/api/mappings'))
+        fetch(getApiUrl('/api/mappings'), { headers: authHeaders() })
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
                     currentMappings = data.mappings;
                     renderSettingsGrid(data.mappings);
+                    populateRegionSelect(data.mappings);
                 }
             });
     }
 
+    function populateRegionSelect(mappings) {
+        const regionSelect = document.getElementById('newRegionSelect');
+        if (!regionSelect) return;
+        const current = regionSelect.value;
+        regionSelect.innerHTML = '<option value="">Barcha kassalar (cheklanmagan)</option>';
+        Object.entries(mappings || {}).forEach(([email, meta]) => {
+            const opt = document.createElement('option');
+            opt.value = email;
+            opt.textContent = (meta && meta.station) ? meta.station : email;
+            regionSelect.appendChild(opt);
+        });
+        regionSelect.value = current;
+    }
+
     function fetchUploadLogs() {
-        fetch(getApiUrl('/api/upload-logs'))
+        fetch(getApiUrl('/api/upload-logs'), { headers: authHeaders() })
             .then(res => res.json())
             .then(data => {
                 if (data.success) {

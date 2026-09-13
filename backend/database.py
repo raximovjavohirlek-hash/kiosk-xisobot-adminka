@@ -857,7 +857,7 @@ def get_all_stats_from_db(db_path, email_map):
         conn.close()
         return None
 
-def get_paginated_tickets_from_db(db_path, page=1, per_page=20, search='', station='', ym=''):
+def get_paginated_tickets_from_db(db_path, page=1, per_page=20, search='', station='', ym='', restrict_email=None):
     init_db(db_path)
     if not os.path.exists(db_path):
         return {'tickets': [], 'total_count': 0, 'page': page, 'per_page': per_page, 'total_pages': 0}
@@ -874,7 +874,10 @@ def get_paginated_tickets_from_db(db_path, page=1, per_page=20, search='', stati
             s_param = f"%{search}%"
             params.extend([s_param, s_param, s_param, s_param])
 
-        if station:
+        if restrict_email:
+            query_conditions.append("LOWER(TRIM(user_email)) = ?")
+            params.append(restrict_email.strip().lower())
+        elif station:
             query_conditions.append("station_name = ?")
             params.append(station)
 

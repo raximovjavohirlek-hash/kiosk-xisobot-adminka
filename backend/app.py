@@ -50,8 +50,8 @@ app.config['ADMIN_PASSWORD'] = os.environ.get('ADMIN_PASSWORD', 'Javo!QAZ')
 TOKEN_SERIALIZER = URLSafeTimedSerializer(app.config['SECRET_KEY'], salt='kiosk-auth-token')
 TOKEN_MAX_AGE_SECONDS = 8 * 60 * 60  # 8 hours
 
-def issue_token(username, role):
-    return TOKEN_SERIALIZER.dumps({'username': username, 'role': role})
+def issue_token(username, role, region=None):
+    return TOKEN_SERIALIZER.dumps({'username': username, 'role': role, 'region': region})
 
 def verify_token(token):
     try:
@@ -81,9 +81,78 @@ def require_auth(role=None):
         return wrapper
     return decorator
 
+def get_auth_region():
+    """Returns the kiosk email the current request's token is scoped to, or None
+    for full/unrestricted access (admin role, or a user with no region assigned)."""
+    auth = getattr(request, 'auth_user', None) or get_request_auth()
+    if not auth or auth.get('role') == 'admin':
+        return None
+    return auth.get('region') or None
+
+def get_client_ip():
+    fwd = request.headers.get('X-Forwarded-For', '')
+    if fwd:
+        return fwd.split(',')[0].strip()
+    return request.remote_addr or 'unknown'
+
 MAPPINGS_FILE = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_mappings.json')
 UPLOAD_LOGS_FILE = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_upload_logs.json')
 USERS_FILE = os.path.join(app.config['UPLOAD_FOLDER'], 'users.json')
+AUDIT_LOG_FILE = os.path.join(app.config['UPLOAD_FOLDER'], 'audit_log.json')
+
+LOGIN_ATTEMPTS = {}
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_WINDOW_SECONDS = 15 * 60
+LOGIN_LOCKOUT_SECONDS = 15 * 60
+
+def is_login_locked(ip, username):
+    key = f"{ip}:{username}"
+    entry = LOGIN_ATTEMPTS.get(key)
+    if not entry or not entry.get('locked_until'):
+        return False, 0
+    now = time.time()
+    if now < entry['locked_until']:
+        return True, int(entry['locked_until'] - now)
+    return False, 0
+
+def record_login_attempt(ip, username, success):
+    key = f"{ip}:{username}"
+    now = time.time()
+    if success:
+        LOGIN_ATTEMPTS.pop(key, None)
+        return
+    entry = LOGIN_ATTEMPTS.get(key)
+    if not entry or (now - entry['first_attempt']) > LOGIN_WINDOW_SECONDS:
+        entry = {'count': 0, 'first_attempt': now, 'locked_until': None}
+    entry['count'] += 1
+    if entry['count'] >= LOGIN_MAX_ATTEMPTS:
+        entry['locked_until'] = now + LOGIN_LOCKOUT_SECONDS
+    LOGIN_ATTEMPTS[key] = entry
+
+def load_audit_log():
+    if os.path.exists(AUDIT_LOG_FILE):
+        try:
+            with open(AUDIT_LOG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
+def add_audit_log(event_type, username, detail="", success=True):
+    logs = load_audit_log()
+    logs.insert(0, {
+        "event_type": event_type,
+        "username": username,
+        "detail": detail,
+        "success": success,
+        "timestamp": datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    })
+    logs = logs[:200]
+    try:
+        with open(AUDIT_LOG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(logs, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 def safe_copy_file(src, dst):
     if not src or not os.path.exists(src):
@@ -111,7 +180,7 @@ def load_users():
     if not users:
         users = []
 
-    has_master = any(str(u.get('username', '')).strip().lower() in ('javohir', 'admin') for u in users)
+    has_master = any(str(u.get('role', '')).strip().lower() == 'admin' for u in users)
     if not has_master:
         master_pass = app.config.get('ADMIN_PASSWORD', 'Javo!QAZ')
         users.insert(0, {
@@ -126,17 +195,8 @@ def load_users():
 
     migrated = False
     for u in users:
-        un = str(u.get('username', '')).strip().lower()
         pw = u.get('password', '')
-        if un in ('javohir', 'admin'):
-            if un == 'admin':
-                u['username'] = 'Javohir'
-                u['name'] = 'Bosh Administrator (Javohir)'
-                migrated = True
-            if not is_hashed_password(pw) or not check_password_hash(pw, 'Javo!QAZ'):
-                u['password'] = generate_password_hash('Javo!QAZ', method='pbkdf2:sha256')
-                migrated = True
-        elif pw and not is_hashed_password(pw):
+        if pw and not is_hashed_password(pw):
             u['password'] = generate_password_hash(pw, method='pbkdf2:sha256')
             migrated = True
 
@@ -708,39 +768,142 @@ def enrich_stats_with_executive_metrics(monthly_data_map, overall_data_map, ytd_
         'last_updated': datetime.now().strftime('%d.%m.%Y %H:%M')
     }
 
+def _scope_to_station(scope_dict, region_email):
+    """Given a stats-shaped dict (has 'stations' and optionally 'daily_trend'),
+    return a copy scoped to the single station matching region_email, with
+    totals recomputed from that station alone (not sliced from network sums)."""
+    stations = scope_dict.get('stations', []) or []
+    match = next((dict(s) for s in stations if str(s.get('email', '')).strip().lower() == region_email), None)
+
+    if not match:
+        empty = dict(scope_dict)
+        empty['stations'] = []
+        empty['total_tickets'] = 0
+        empty['total_summa'] = 0
+        empty['daily_trend'] = []
+        empty['director_summary'] = {
+            'net_revenue': 0, 'total_tickets': 0, 'overall_avg_price': 0,
+            'daily_avg_revenue': 0, 'daily_avg_tickets': 0, 'peak_date': '-',
+            'peak_day_revenue': 0, 'top_station': "Noma'lum", 'top_station_summa': 0,
+            'top_station_share': 0, 'second_station': '-', 'second_station_summa': 0,
+            'online_percent': 0, 'terminal_percent': 0, 'period_name': '',
+            'ai_recommendation': ''
+        }
+        return empty
+
+    match['share_percent'] = 100.0
+    soni = match.get('soni_val', 0)
+    summa = match.get('summa_val', 0)
+    daily_breakdown = match.get('daily_breakdown', []) or []
+
+    scoped = dict(scope_dict)
+    scoped['stations'] = [match]
+    scoped['total_tickets'] = soni
+    scoped['total_summa'] = summa
+    scoped['daily_trend'] = [
+        {'date': d.get('date'), 'tickets': d.get('tickets', 0), 'summa': d.get('summa', 0)}
+        for d in daily_breakdown
+    ]
+
+    avg_p = round(summa / soni) if soni > 0 else 0
+    d_len = len(scoped['daily_trend'])
+    d_avg_s = round(summa / d_len) if d_len > 0 else 0
+    d_avg_t = round(soni / d_len) if d_len > 0 else 0
+    peak_day = max(scoped['daily_trend'], key=lambda x: x.get('summa', 0)) if scoped['daily_trend'] else {'date': '-', 'summa': 0}
+
+    scoped['director_summary'] = {
+        'net_revenue': summa,
+        'total_tickets': soni,
+        'overall_avg_price': avg_p,
+        'daily_avg_revenue': d_avg_s,
+        'daily_avg_tickets': d_avg_t,
+        'peak_date': peak_day.get('date', '-'),
+        'peak_day_revenue': peak_day.get('summa', 0),
+        'top_station': match.get('stansiya'),
+        'top_station_summa': summa,
+        'top_station_share': 100.0,
+        'second_station': '-',
+        'second_station_summa': 0,
+        'online_percent': 0,
+        'terminal_percent': 0,
+        'period_name': scope_dict.get('director_summary', {}).get('period_name', ''),
+        'ai_recommendation': f"Sizning kassangiz ({match.get('stansiya')}) bo'yicha jami {summa:,} so'm tushum va {soni:,} ta chipta sotildi."
+    }
+    return scoped
+
+def filter_stats_for_region(stats, region_email):
+    """Deep-filters a full stats dict (as returned by get_all_stats_from_db +
+    enrich_stats_with_executive_metrics / process_excel) down to a single
+    kiosk's own data, recomputing all aggregate totals from that station
+    alone rather than slicing the network-wide sums."""
+    if not stats or not region_email:
+        return stats
+
+    region_email = region_email.strip().lower()
+    filtered = dict(stats)
+
+    filtered_monthly = {}
+    for ym, m_info in (stats.get('monthly_data') or {}).items():
+        filtered_monthly[ym] = _scope_to_station(m_info, region_email)
+    filtered['monthly_data'] = filtered_monthly
+
+    filtered['overall_data'] = _scope_to_station(stats.get('overall_data') or {}, region_email)
+    filtered['ytd_data'] = _scope_to_station(stats.get('ytd_data') or {}, region_email)
+
+    top_level_scoped = _scope_to_station(stats, region_email)
+    filtered['stations'] = top_level_scoped['stations']
+    filtered['total_tickets'] = top_level_scoped['total_tickets']
+    filtered['total_summa'] = top_level_scoped['total_summa']
+    filtered['daily_trend'] = top_level_scoped['daily_trend']
+    filtered['director_summary'] = top_level_scoped['director_summary']
+
+    filtered['available_months'] = stats.get('available_months', [])
+    return filtered
+
 @app.route('/api/stats', methods=['GET'])
 @require_auth()
 def get_stats():
     global STATS_CACHE
+    stats = None
+    error = None
+
     if STATS_CACHE is not None:
-        return jsonify({'success': True, 'stats': STATS_CACHE, 'monthly_reports': STATS_CACHE.get('monthly_data', {})})
+        stats = STATS_CACHE
+    else:
+        db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+        email_map = load_mappings()
+        try:
+            from database import get_all_stats_from_db
+            db_stats = get_all_stats_from_db(db_path, email_map)
+            if db_stats:
+                stats = enrich_stats_with_executive_metrics(
+                    db_stats['monthly_data'],
+                    db_stats['overall_data'],
+                    db_stats['ytd_data'],
+                    db_stats['available_months']
+                )
+                STATS_CACHE = stats
+        except Exception as db_err:
+            print("[DB] Stats query warning:", db_err)
 
-    db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
-    email_map = load_mappings()
-    try:
-        from database import get_all_stats_from_db
-        db_stats = get_all_stats_from_db(db_path, email_map)
-        if db_stats:
-            stats = enrich_stats_with_executive_metrics(
-                db_stats['monthly_data'],
-                db_stats['overall_data'],
-                db_stats['ytd_data'],
-                db_stats['available_months']
-            )
-            STATS_CACHE = stats
-            return jsonify({'success': True, 'stats': stats, 'monthly_reports': stats.get('monthly_data', {})})
-    except Exception as db_err:
-        print("[DB] Stats query warning:", db_err)
+        if stats is None:
+            report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
+            data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
+            try:
+                stats = process_excel(data_path, report_path)
+                STATS_CACHE = stats
+            except Exception as e:
+                print("get_stats error:", e)
+                error = str(e)
 
-    report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
-    data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
-    try:
-        stats = process_excel(data_path, report_path)
-        STATS_CACHE = stats
-        return jsonify({'success': True, 'stats': stats, 'monthly_reports': stats.get('monthly_data', {})})
-    except Exception as e:
-        print("get_stats error:", e)
-        return jsonify({'success': False, 'error': str(e)}), 500
+    if stats is None:
+        return jsonify({'success': False, 'error': error or "Statistikani yuklab bo'lmadi"}), 500
+
+    region = get_auth_region()
+    if region:
+        stats = filter_stats_for_region(stats, region)
+
+    return jsonify({'success': True, 'stats': stats, 'monthly_reports': stats.get('monthly_data', {})})
 
 def safe_filename(filename):
     filename = os.path.basename(filename)
@@ -886,7 +1049,8 @@ def get_tickets():
         station = request.args.get('station', '').strip()
         ym = request.args.get('ym', '').strip()
 
-        result = get_paginated_tickets_from_db(db_path, page=page, per_page=per_page, search=search, station=station, ym=ym)
+        region = get_auth_region()
+        result = get_paginated_tickets_from_db(db_path, page=page, per_page=per_page, search=search, station=station, ym=ym, restrict_email=region)
         return jsonify({'success': True, 'data': result})
     except Exception as ex:
         print("get_tickets error:", ex)
@@ -921,6 +1085,11 @@ def download():
     else:
         selected_stats = db_stats.get('overall_data') or db_stats
         period_name = 'Barcha_Oylar'
+
+    region = get_auth_region()
+    if region:
+        selected_stats = _scope_to_station(selected_stats, region)
+        report_path = ''  # regional exports must not fall back to the network-wide template file below
 
     # If template 'Август кисока.xlsx' exists, update and send it
     if os.path.exists(report_path):
@@ -1061,6 +1230,7 @@ def download():
     )
 
 @app.route('/api/export-station-excel/<path:station_name>', methods=['GET'])
+@require_auth()
 def export_station_excel(station_name):
     try:
         requested_month = request.args.get('month')
@@ -1086,6 +1256,10 @@ def export_station_excel(station_name):
         
         if not station_data:
             return jsonify({'error': 'Stansiya topilmadi'}), 404
+
+        region = get_auth_region()
+        if region and str(station_data.get('email', '')).strip().lower() != region:
+            return jsonify({'error': "Sizga ruxsat berilmagan"}), 403
 
         # Create openpyxl workbook
         wb = openpyxl.Workbook()
@@ -1246,11 +1420,9 @@ def export_station_excel(station_name):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/mappings', methods=['GET', 'POST'])
+@require_auth(role='admin')
 def handle_mappings():
     if request.method == 'POST':
-        auth = get_request_auth()
-        if not auth or auth.get('role') != 'admin':
-            return jsonify({'success': False, 'error': "Ushbu amal uchun ruxsatingiz yo'q!"}), 403
         new_map = request.json
         save_mappings(new_map)
         invalidate_stats_cache()
@@ -1258,64 +1430,55 @@ def handle_mappings():
     return jsonify({'success': True, 'mappings': load_mappings()})
 
 @app.route('/api/upload-logs', methods=['GET'])
+@require_auth(role='admin')
 def get_upload_logs():
     return jsonify({'success': True, 'logs': load_upload_logs()})
 
-@app.route('/api/admin/login', methods=['POST'])
-def admin_login():
-    data = request.json or {}
-    password = data.get('password', '')
-    if password == app.config['ADMIN_PASSWORD']:
-        return jsonify({
-            'success': True,
-            'message': 'Admin rejimiga kirdingiz!',
-            'token': issue_token('admin', 'admin')
-        })
-    return jsonify({'success': False, 'error': "Parol noto'g'ri!"}), 401
+@app.route('/api/audit-logs', methods=['GET'])
+@require_auth(role='admin')
+def get_audit_logs():
+    return jsonify({'success': True, 'logs': load_audit_log()})
 
 @app.route('/api/auth/login', methods=['POST'])
 def auth_login():
     data = request.json or {}
     username = str(data.get('username', '')).strip().lower()
     password = str(data.get('password', '')).strip()
+    client_ip = get_client_ip()
 
-    master_usernames = ('javohir', 'admin')
-    master_passwords = ('javo!qaz', 'admin', str(app.config.get('ADMIN_PASSWORD', '')).lower())
+    if not username or not password:
+        return jsonify({'success': False, 'error': "Login yoki parol noto'g'ri!"}), 401
 
-    is_master_user = username in master_usernames or not username
-    is_master_pass = password.lower() in master_passwords
+    locked, retry_after = is_login_locked(client_ip, username)
+    if locked:
+        add_audit_log('login_fail', username, detail='rate_limited', success=False)
+        return jsonify({'success': False, 'error': f"Juda ko'p urinish. Iltimos, {retry_after} soniyadan so'ng qayta urinib ko'ring."}), 429
 
     users = load_users()
     for u in users:
         u_name = str(u.get('username', '')).strip().lower()
-        if u_name == username or (is_master_user and u_name in master_usernames):
-            if verify_user_password(u.get('password', ''), password) or (is_master_user and is_master_pass):
-                role = u.get('role', 'admin' if is_master_user else 'user')
-                token = issue_token(u.get('username', 'Javohir'), role)
+        if u_name == username:
+            if verify_user_password(u.get('password', ''), password):
+                record_login_attempt(client_ip, username, success=True)
+                role = u.get('role', 'user')
+                region = None if role == 'admin' else u.get('region')
+                token = issue_token(u.get('username', username), role, region)
+                add_audit_log('login_success', u.get('username', username))
                 return jsonify({
                     'success': True,
                     'message': 'Muvaffaqiyatli tizimga kirdingiz!',
                     'token': token,
                     'user': {
-                        'username': u.get('username', 'Javohir'),
-                        'name': u.get('name', 'Bosh Administrator (Javohir)'),
-                        'role': role
+                        'username': u.get('username', username),
+                        'name': u.get('name', u.get('username', username)),
+                        'role': role,
+                        'region': region
                     }
                 })
+            break
 
-    if is_master_user and is_master_pass:
-        token = issue_token('Javohir', 'admin')
-        return jsonify({
-            'success': True,
-            'message': 'Bosh administrator sifatida kirdingiz!',
-            'token': token,
-            'user': {
-                'username': 'Javohir',
-                'name': 'Bosh Administrator (Javohir)',
-                'role': 'admin'
-            }
-        })
-
+    record_login_attempt(client_ip, username, success=False)
+    add_audit_log('login_fail', username, success=False)
     return jsonify({'success': False, 'error': "Login yoki parol noto'g'ri!"}), 401
 
 @app.route('/api/users', methods=['GET', 'POST'])
@@ -1327,32 +1490,43 @@ def manage_users():
             'username': u.get('username'),
             'name': u.get('name'),
             'role': u.get('role', 'user'),
+            'region': u.get('region'),
             'created_at': u.get('created_at', '')
         } for u in users]
         return jsonify({'success': True, 'users': safe_users})
-    
+
     elif request.method == 'POST':
         data = request.json or {}
         username = str(data.get('username', '')).strip().lower()
         password = str(data.get('password', '')).strip()
         name = str(data.get('name', '')).strip() or username
         role = str(data.get('role', 'user')).strip().lower()
-        
+        region = str(data.get('region', '')).strip().lower() or None
+
         if not username or not password:
             return jsonify({'success': False, 'error': "Login va parol kiritilishi shart!"}), 400
-            
+
+        if role == 'admin':
+            region = None
+        elif region:
+            allowed_emails = {str(k).strip().lower() for k in load_mappings().keys()}
+            if region not in allowed_emails:
+                return jsonify({'success': False, 'error': "Noma'lum kassa/hudud tanlandi!"}), 400
+
         users = load_users()
         if any(u.get('username', '').lower() == username for u in users):
             return jsonify({'success': False, 'error': "Bunday loginli foydalanuvchi allaqachon mavjud!"}), 400
-            
+
         users.append({
             'username': username,
             'password': generate_password_hash(password, method='pbkdf2:sha256'),
             'name': name,
             'role': role,
+            'region': region,
             'created_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         })
         save_users(users)
+        add_audit_log('user_created', request.auth_user.get('username', ''), detail=f"created {username} role={role} region={region}")
         return jsonify({'success': True, 'message': f"Foydalanuvchi '{username}' muvaffaqiyatli qo'shildi!"})
 
 @app.route('/api/users/<username>', methods=['DELETE'])
@@ -1361,13 +1535,14 @@ def delete_user(username):
     username_clean = str(username).strip().lower()
     if username_clean == 'admin':
         return jsonify({'success': False, 'error': "Bosh admin foydalanuvchisini o'chirib bo'lmaydi!"}), 400
-        
+
     users = load_users()
     new_users = [u for u in users if u.get('username', '').lower() != username_clean]
     if len(new_users) == len(users):
         return jsonify({'success': False, 'error': "Foydalanuvchi topilmadi!"}), 404
-        
+
     save_users(new_users)
+    add_audit_log('user_deleted', request.auth_user.get('username', ''), detail=username_clean)
     return jsonify({'success': True, 'message': f"Foydalanuvchi '{username_clean}' o'chirildi!"})
 
 @app.route('/api/admin/override-station', methods=['POST'])
@@ -1409,6 +1584,7 @@ def override_station_stats():
 
         station_name = email_map.get(email, {}).get('station', email)
         period_desc = f"{day_str} sanasi" if day_str != 'ALL' else f"{ym} oyi"
+        add_audit_log('override_create', request.auth_user.get('username', ''), detail=f"{email} {ym} {day_str}")
         return jsonify({
             'success': True,
             'message': f"'{station_name}' kassasining {period_desc} uchun ko'rsatkichlari muvaffaqiyatli o'zgartirildi va saqlandi!",
@@ -1446,17 +1622,22 @@ def handle_overrides():
             STATS_CACHE = stats
         else:
             stats = None
+        add_audit_log('override_delete', request.auth_user.get('username', ''), detail=f"{email} {ym} {day_str}")
         return jsonify({'success': True, 'message': "Tahrir bekor qilindi va asl ko'rsatkichlar tiklandi!", 'stats': stats})
     else:
         overrides = get_station_overrides(db_path)
         return jsonify({'success': True, 'overrides': overrides})
 
 @app.route('/api/director-summary', methods=['GET'])
+@require_auth()
 def get_director_summary():
     report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
     data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
     try:
         stats = process_excel(data_path, report_path)
+        region = get_auth_region()
+        if region:
+            stats = _scope_to_station(stats, region)
         return jsonify({
             'success': True,
             'director_summary': stats.get('director_summary', {}),

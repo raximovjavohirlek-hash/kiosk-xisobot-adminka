@@ -522,6 +522,12 @@
                                         <option value="admin">Administrator (To'liq)</option>
                                     </select>
                                 </div>
+                                <div id="newRegionGroup">
+                                    <label style="font-size: 12.5px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Biriktirilgan Kassa (Region):</label>
+                                    <select id="newRegionSelect" class="input-control" style="background: var(--bg-card); color: var(--text-primary);">
+                                        <option value="">Barcha kassalar (cheklanmagan)</option>
+                                    </select>
+                                </div>
                                 <button type="submit" class="btn btn-primary" style="margin-top: 6px; height: 40px; justify-content: center;">
                                     <i class="fa-solid fa-user-check"></i> Qo'shish
                                 </button>
@@ -538,11 +544,12 @@
                                             <th>Login</th>
                                             <th>Ism</th>
                                             <th>Rol</th>
+                                            <th>Kassa</th>
                                             <th>Amal</th>
                                         </tr>
                                     </thead>
                                     <tbody id="usersTableBody">
-                                        <tr><td colspan="4" class="empty-row">Foydalanuvchilar yuklanmoqda...</td></tr>
+                                        <tr><td colspan="5" class="empty-row">Foydalanuvchilar yuklanmoqda...</td></tr>
                                     </tbody>
                                 </table>
                             </div>
