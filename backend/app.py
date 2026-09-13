@@ -1147,53 +1147,83 @@ def get_tickets():
 @app.route('/api/download', methods=['GET'])
 @require_auth()
 def download():
-    period = request.args.get('period') or request.args.get('ym') or 'all'
+    raw_period = (request.args.get('period') or request.args.get('ym') or 'all').strip()
     db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
     email_map = load_mappings()
 
-    report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
-
-    try:
-        from database import get_all_stats_from_db
-        db_stats = get_all_stats_from_db(db_path, email_map)
-    except Exception as ex:
-        print("get_all_stats_from_db error in download:", ex)
-        db_stats = None
+    global STATS_CACHE
+    db_stats = None
+    if STATS_CACHE is not None:
+        db_stats = STATS_CACHE
+    else:
+        try:
+            from database import get_all_stats_from_db
+            db_stats = get_all_stats_from_db(db_path, email_map)
+            if db_stats:
+                db_stats = enrich_stats_with_executive_metrics(
+                    db_stats['monthly_data'],
+                    db_stats['overall_data'],
+                    db_stats['ytd_data'],
+                    db_stats['available_months']
+                )
+                STATS_CACHE = db_stats
+        except Exception as ex:
+            print("get_all_stats_from_db error in download:", ex)
+            db_stats = None
 
     if not db_stats:
+        report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
         data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
         db_stats = process_excel(data_path, report_path)
+        STATS_CACHE = db_stats
 
-    if period in db_stats.get('monthly_data', {}):
-        selected_stats = db_stats['monthly_data'][period]
-        period_name = period
+    available_months = db_stats.get('available_months', []) if db_stats else []
+    monthly_data = db_stats.get('monthly_data', {}) if db_stats else {}
+
+    # Resolve 'latest' to newest available month code (e.g. '2026-08')
+    period = raw_period
+    if period == 'latest':
+        if available_months:
+            period = available_months[0].get('code', 'latest')
+        elif monthly_data:
+            period = sorted(list(monthly_data.keys()), reverse=True)[0]
+
+    month_lookup = {m.get('code'): m.get('name') for m in available_months}
+
+    if period in monthly_data:
+        selected_stats = monthly_data[period]
+        period_title = month_lookup.get(period, period)
+        file_period = period
+        is_multi_month = False
     elif period == 'ytd' and 'ytd_data' in db_stats:
         selected_stats = db_stats['ytd_data']
-        period_name = 'YTD'
-    else:
+        year = selected_stats.get('year', '2026')
+        period_title = f"{year} YTD (Yil boshidan beri)"
+        file_period = f"{year}_YTD"
+        is_multi_month = True
+    elif period in ('all', 'overall') or not period:
         selected_stats = db_stats.get('overall_data') or db_stats
-        period_name = 'Barcha_Oylar'
+        period_title = "Barcha Oylar Birgalikda"
+        file_period = "Barcha_Oylar"
+        is_multi_month = True
+    else:
+        # Fallback if specific code was passed
+        selected_stats = db_stats.get('monthly_data', {}).get(period) or db_stats.get('overall_data') or db_stats
+        period_title = month_lookup.get(period, period)
+        file_period = period
+        is_multi_month = False
 
     region = get_auth_region()
     if region:
         selected_stats = _scope_to_station(selected_stats, region)
-        report_path = ''  # regional exports must not fall back to the network-wide template file below
-
-    # If template 'Август кисока.xlsx' exists, update and send it
-    if os.path.exists(report_path):
-        try:
-            wb = openpyxl.load_workbook(report_path)
-            out_buf = io.BytesIO()
-            wb.save(out_buf)
-            out_buf.seek(0)
-            return send_file(
-                out_buf,
-                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                as_attachment=True,
-                download_name=f'Kiosk_Hisobot_{period_name}.xlsx'
-            )
-        except Exception as e:
-            print("Template update error, fallback to dynamic excel:", e)
+        st_list = selected_stats.get('stations', [])
+        station_title = st_list[0].get('stansiya', region) if st_list else region
+        safe_st = "".join(c for c in station_title if c.isalnum() or c in (' ', '_', '-')).strip()
+        doc_header = f"{station_title} — Kiosk Chipta Sotuvi Hisoboti ({period_title})"
+        download_name = f'Kiosk_Hisobot_{safe_st}_{file_period}.xlsx'
+    else:
+        doc_header = f"Kiosklar Bo'yicha Chipta Sotuvi Hisoboti ({period_title})"
+        download_name = f'Kiosk_Hisobot_{file_period}.xlsx'
 
     # Dynamic openpyxl Workbook Generation
     wb = openpyxl.Workbook()
@@ -1213,19 +1243,27 @@ def download():
         bottom=Side(style='thin', color='CBD5E1')
     )
 
+    # Title Banner
     ws.merge_cells('A1:G1')
-    ws['A1'] = f"Kiosklar Bo'yicha Chipta Sotuvi Hisoboti ({period_name})"
+    ws['A1'] = doc_header
     ws['A1'].font = Font(name="Arial", size=14, bold=True, color="0F172A")
     ws['A1'].alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[1].height = 30
+    ws.row_dimensions[1].height = 32
+
+    # Metadata Subtitle
+    ws.merge_cells('A2:G2')
+    ws['A2'] = f"O'zbekiston Temir Yo'llari — Kiosk Analytics PRO | Shakllantirilgan vaqt: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+    ws['A2'].font = Font(name="Arial", size=9, italic=True, color="64748B")
+    ws['A2'].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[2].height = 18
 
     headers = ['№', 'Kassa Stansiyasi', 'Pochta Manzili', 'Chiptalar Soni (ta)', 'Tushum Summasi (so\'m)', 'Ulushi (%)', 'O\'rtacha Narx (so\'m)']
     ws.append([])
     ws.append(headers)
-    ws.row_dimensions[3].height = 25
+    ws.row_dimensions[4].height = 25
 
     for col_num, h in enumerate(headers, 1):
-        cell = ws.cell(row=3, column=col_num)
+        cell = ws.cell(row=4, column=col_num)
         cell.fill = header_fill
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -1242,7 +1280,7 @@ def download():
         pct = st.get('share_percent', round((summa / tot_summa * 100), 1) if tot_summa else 0.0)
         avg_p = round(summa / soni) if soni > 0 else 0
 
-        r_idx = idx + 3
+        r_idx = idx + 4
         ws.append([idx, s_name, email, soni, summa, pct, avg_p])
 
         ws.cell(row=r_idx, column=1).alignment = Alignment(horizontal="center")
@@ -1256,7 +1294,7 @@ def download():
             cell.font = data_font
             cell.border = thin_border
 
-    tot_row_idx = len(stations) + 4
+    tot_row_idx = len(stations) + 5
     ws.append(['', 'JAMI', '', tot_tickets, tot_summa, 100.0, round(tot_summa / tot_tickets) if tot_tickets > 0 else 0])
     for c_idx in range(1, 8):
         cell = ws.cell(row=tot_row_idx, column=c_idx)
@@ -1273,6 +1311,86 @@ def download():
         col_letter = openpyxl.utils.get_column_letter(col[0].column)
         ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
 
+    # Multi-month analysis sheet for YTD and All Months
+    if is_multi_month and not region and available_months:
+        ws_months = wb.create_sheet(title="Oylar Tahlili")
+        ws_months.views.sheetView[0].showGridLines = True
+        m_headers = ['№', 'Hisobot Oyi', 'Chiptalar Soni (ta)', 'Tushum Summasi (so\'m)', 'Online Chiptalar', 'Online Summa', 'Terminal Chiptalar', 'Terminal Summa', 'Ulushi (%)']
+        ws_months.append(m_headers)
+        for col_num, h in enumerate(m_headers, 1):
+            cell = ws_months.cell(row=1, column=col_num)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        m_tot_tix = 0
+        m_tot_sum = 0
+        m_tot_on_tix = 0
+        m_tot_on_sum = 0
+        m_tot_term_tix = 0
+        m_tot_term_sum = 0
+
+        sorted_m = sorted(available_months, key=lambda x: x['code'])
+        if period == 'ytd':
+            sorted_m = [m for m in sorted_m if m['code'].startswith('2026')]
+
+        ytd_or_all_sum = tot_summa or 1
+
+        for m_idx, m_info in enumerate(sorted_m, 1):
+            m_code = m_info['code']
+            m_data = monthly_data.get(m_code, {})
+            m_tickets = m_data.get('total_tickets', 0)
+            m_summa = m_data.get('total_summa', 0)
+            d_list = m_data.get('daily_trend', [])
+            m_on_tix = sum(d.get('online_tickets', 0) for d in d_list)
+            m_on_sum = sum(d.get('online_summa', 0) for d in d_list)
+            m_term_tix = sum(d.get('terminal_tickets', 0) for d in d_list)
+            m_term_sum = sum(d.get('terminal_summa', 0) for d in d_list)
+            share_pct = round((m_summa / ytd_or_all_sum * 100), 1) if ytd_or_all_sum else 0.0
+
+            m_tot_tix += m_tickets
+            m_tot_sum += m_summa
+            m_tot_on_tix += m_on_tix
+            m_tot_on_sum += m_on_sum
+            m_tot_term_tix += m_term_tix
+            m_tot_term_sum += m_term_sum
+
+            r_i = m_idx + 1
+            ws_months.append([
+                m_idx, m_info['name'], m_tickets, m_summa,
+                m_on_tix, m_on_sum, m_term_tix, m_term_sum, share_pct
+            ])
+            ws_months.cell(row=r_i, column=1).alignment = Alignment(horizontal="center")
+            ws_months.cell(row=r_i, column=3).number_format = '#,##0'
+            ws_months.cell(row=r_i, column=4).number_format = '#,##0'
+            ws_months.cell(row=r_i, column=5).number_format = '#,##0'
+            ws_months.cell(row=r_i, column=6).number_format = '#,##0'
+            ws_months.cell(row=r_i, column=7).number_format = '#,##0'
+            ws_months.cell(row=r_i, column=8).number_format = '#,##0'
+            ws_months.cell(row=r_i, column=9).number_format = '0.0'
+            for c_i in range(1, 10):
+                cell = ws_months.cell(row=r_i, column=c_i)
+                cell.font = data_font
+                cell.border = thin_border
+
+        tot_m_r = len(sorted_m) + 2
+        ws_months.append(['', 'JAMI', m_tot_tix, m_tot_sum, m_tot_on_tix, m_tot_on_sum, m_tot_term_tix, m_tot_term_sum, 100.0])
+        for c_i in range(1, 10):
+            cell = ws_months.cell(row=tot_m_r, column=c_i)
+            cell.font = bold_font
+            cell.border = thin_border
+            cell.fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+            if c_i in (3, 4, 5, 6, 7, 8):
+                cell.number_format = '#,##0'
+            elif c_i == 9:
+                cell.number_format = '0.0'
+
+        for col in ws_months.columns:
+            max_len = max(len(str(cell.value or '')) for cell in col)
+            col_letter = openpyxl.utils.get_column_letter(col[0].column)
+            ws_months.column_dimensions[col_letter].width = max(max_len + 4, 14)
+
+    # Daily Trend Sheet
     ws_daily = wb.create_sheet(title="Kunlik Trend")
     ws_daily.views.sheetView[0].showGridLines = True
     d_headers = ['Sana', 'Jami Chiptalar (ta)', 'Jami Summa (so\'m)', 'Online Chiptalar', 'Online Summa', 'Terminal Chiptalar', 'Terminal Summa']
@@ -1284,6 +1402,15 @@ def download():
         cell.alignment = Alignment(horizontal="center", vertical="center")
 
     daily_trend = selected_stats.get('daily_trend', [])
+    if is_multi_month and not region and monthly_data:
+        all_days = []
+        for m_code in sorted(monthly_data.keys()):
+            if period == 'ytd' and not m_code.startswith('2026'):
+                continue
+            all_days.extend(monthly_data[m_code].get('daily_trend', []))
+        if all_days:
+            daily_trend = all_days
+
     for r_i, dt in enumerate(daily_trend, 2):
         ws_daily.append([
             dt.get('date', ''),
@@ -1301,6 +1428,23 @@ def download():
             if c_i >= 2:
                 cell.number_format = '#,##0'
 
+    if daily_trend:
+        tot_d_r = len(daily_trend) + 2
+        d_tix = sum(d.get('tickets', 0) for d in daily_trend)
+        d_sum = sum(d.get('summa', 0) for d in daily_trend)
+        d_on_tix = sum(d.get('online_tickets', 0) for d in daily_trend)
+        d_on_sum = sum(d.get('online_summa', 0) for d in daily_trend)
+        d_term_tix = sum(d.get('terminal_tickets', 0) for d in daily_trend)
+        d_term_sum = sum(d.get('terminal_summa', 0) for d in daily_trend)
+        ws_daily.append(['JAMI', d_tix, d_sum, d_on_tix, d_on_sum, d_term_tix, d_term_sum])
+        for c_i in range(1, 8):
+            cell = ws_daily.cell(row=tot_d_r, column=c_i)
+            cell.font = bold_font
+            cell.border = thin_border
+            cell.fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+            if c_i >= 2:
+                cell.number_format = '#,##0'
+
     for col in ws_daily.columns:
         max_len = max(len(str(cell.value or '')) for cell in col)
         col_letter = openpyxl.utils.get_column_letter(col[0].column)
@@ -1314,7 +1458,7 @@ def download():
         out_buf,
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         as_attachment=True,
-        download_name=f'Kiosk_Hisobot_{period_name}.xlsx'
+        download_name=download_name
     )
 
 @app.route('/api/export-station-excel/<path:station_name>', methods=['GET'])
@@ -1323,15 +1467,36 @@ def export_station_excel(station_name):
     try:
         requested_month = request.args.get('month')
         all_reports = get_all_official_monthly_reports()
-        
-        if requested_month and requested_month in all_reports:
-            stats = all_reports[requested_month]
-            m_code_str = requested_month
-        else:
-            report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
-            data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
-            stats = process_excel(data_path, report_path)
-            m_code_str = '2026-08'
+        stats = None
+        m_code_str = requested_month or '2026-08'
+
+        db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+        email_map = load_mappings()
+        try:
+            from database import get_all_stats_from_db
+            db_stats = get_all_stats_from_db(db_path, email_map)
+            if db_stats:
+                if requested_month in db_stats.get('monthly_data', {}):
+                    stats = db_stats['monthly_data'][requested_month]
+                    m_code_str = requested_month
+                elif requested_month == 'ytd' and 'ytd_data' in db_stats:
+                    stats = db_stats['ytd_data']
+                    m_code_str = '2026_YTD'
+                elif requested_month in ('all', 'overall'):
+                    stats = db_stats.get('overall_data') or db_stats
+                    m_code_str = 'Barcha_Oylar'
+        except Exception as e_db:
+            print("DB check in export_station_excel warning:", e_db)
+
+        if not stats:
+            if requested_month and requested_month in all_reports:
+                stats = all_reports[requested_month]
+                m_code_str = requested_month
+            else:
+                report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
+                data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
+                stats = process_excel(data_path, report_path)
+                m_code_str = '2026-08'
         
         stations = stats.get('stations', [])
         station_data = None

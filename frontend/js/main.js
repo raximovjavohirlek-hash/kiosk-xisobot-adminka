@@ -63,8 +63,22 @@ async function downloadWithAuth(url, fallbackFilename) {
         throw new Error(message);
     }
     const disposition = resp.headers.get('Content-Disposition') || '';
-    const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
-    const filename = match ? decodeURIComponent(match[1]) : fallbackFilename;
+    let filename = fallbackFilename;
+    if (disposition) {
+        const rfcMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+        if (rfcMatch) {
+            try {
+                filename = decodeURIComponent(rfcMatch[1]);
+            } catch (e) {
+                filename = fallbackFilename;
+            }
+        } else {
+            const stdMatch = disposition.match(/filename="?([^";]+)"?/i);
+            if (stdMatch) {
+                filename = stdMatch[1];
+            }
+        }
+    }
     const blob = await resp.blob();
     const blobUrl = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -780,10 +794,26 @@ document.addEventListener('DOMContentLoaded', () => {
     if (downloadBtn) {
         downloadBtn.addEventListener('click', async (e) => {
             e.preventDefault();
-            const period = currentSelectedPeriod || 'all';
+            let period = currentSelectedPeriod || 'all';
+            if (period === 'latest') {
+                if (fullBackendStats && fullBackendStats.available_months && fullBackendStats.available_months.length > 0) {
+                    period = fullBackendStats.available_months[0].code;
+                } else {
+                    period = '2026-08';
+                }
+            }
+            let displayName = period;
+            if (period === 'ytd') displayName = '2026 YTD';
+            else if (period === 'all') displayName = 'Barcha Oylar';
+            else if (fullBackendStats && fullBackendStats.available_months) {
+                const found = fullBackendStats.available_months.find(m => m.code === period);
+                if (found) displayName = found.name;
+            }
+
             const downloadUrl = getApiUrl(`/api/download?period=${encodeURIComponent(period)}`);
             try {
-                await downloadWithAuth(downloadUrl, `hisobot-${period}.xlsx`);
+                showToast('info', 'Excel Hisobot', `${displayName} hisoboti tayyorlanmoqda va yuklanmoqda...`);
+                await downloadWithAuth(downloadUrl, `Kiosk_Hisobot_${period}.xlsx`);
             } catch (err) {
                 showToast('error', 'Xatolik', err.message || "Faylni yuklab bo'lmadi.");
             }
