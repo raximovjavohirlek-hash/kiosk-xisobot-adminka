@@ -6,12 +6,15 @@ __pycache__/
 .vscode/
 .idea/
 
-# Sensitive / generated data — never commit
+# Sensitive / generated data
 backend/kiosk_token.json
-backend/users.json
-backend/kiosk_data.db
-backend/kiosk_upload_logs.json
-kiosk_upload_logs.json
 backend/audit_log.json
 audit_log.json
+kiosk_upload_logs.json
+
+# Allow persistent database and seeds to be deployed to Render
+!backend/kiosk_data.db
+!backend/kiosk_upload_logs.json
+!backend/users.json
 *.xlsx
+!backend/excellar/**

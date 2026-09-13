@@ -739,6 +739,11 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.classList.add('active');
             const targetSection = document.getElementById(targetSubtab);
             if (targetSection) targetSection.classList.add('active');
+
+            if (targetSubtab === 'admin-override') {
+                populateOverrideDropdowns(fullBackendStats);
+                fetchOverrides();
+            }
         });
     });
 
@@ -917,28 +922,69 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function populateOverrideDropdowns(stats) {
         if (overrideYmSelect) {
-            overrideYmSelect.innerHTML = '';
-            let availableMonths = (stats && stats.available_months && stats.available_months.length > 0)
+            const MONTH_NAMES = {
+                '01': 'Yanvar', '02': 'Fevral', '03': 'Mart', '04': 'Aprel',
+                '05': 'May', '06': 'Iyun', '07': 'Iyul', '08': 'Avgust',
+                '09': 'Sentabr', '10': 'Oktabr', '11': 'Noyabr', '12': 'Dekabr'
+            };
+
+            const now = new Date();
+            const curY = now.getFullYear();
+            const curM = String(now.getMonth() + 1).padStart(2, '0');
+            const curCode = `${curY}-${curM}`;
+            const curName = `${MONTH_NAMES[curM] || curM} ${curY}`;
+
+            let availableMonths = [];
+            const src = (stats && stats.available_months && stats.available_months.length > 0)
                 ? stats.available_months
                 : (fullBackendStats && fullBackendStats.available_months && fullBackendStats.available_months.length > 0)
                     ? fullBackendStats.available_months
-                    : [
-                        { code: '2026-08', name: 'Avgust 2026' },
-                        { code: '2026-07', name: 'Iyul 2026' },
-                        { code: '2026-06', name: 'Iyun 2026' },
-                        { code: '2026-05', name: 'May 2026' },
-                        { code: '2026-04', name: 'Aprel 2026' },
-                        { code: '2026-03', name: 'Mart 2026' },
-                        { code: '2026-02', name: 'Fevral 2026' },
-                        { code: '2026-01', name: 'Yanvar 2026' }
-                    ];
+                    : [];
 
+            if (src.length > 0) {
+                availableMonths = src.map(m => ({ ...m }));
+            }
+
+            // Always ensure the current real calendar month (e.g. Sentabr 2026) is available at the top!
+            if (!availableMonths.some(m => m.code === curCode)) {
+                availableMonths.unshift({ code: curCode, name: curName });
+            }
+
+            // Fallback past months if empty
+            const fallbackList = [
+                { code: '2026-09', name: 'Sentabr 2026' },
+                { code: '2026-08', name: 'Avgust 2026' },
+                { code: '2026-07', name: 'Iyul 2026' },
+                { code: '2026-06', name: 'Iyun 2026' },
+                { code: '2026-05', name: 'May 2026' },
+                { code: '2026-04', name: 'Aprel 2026' },
+                { code: '2026-03', name: 'Mart 2026' },
+                { code: '2026-02', name: 'Fevral 2026' },
+                { code: '2026-01', name: 'Yanvar 2026' }
+            ];
+            fallbackList.forEach(fb => {
+                if (!availableMonths.some(m => m.code === fb.code)) {
+                    availableMonths.push(fb);
+                }
+            });
+
+            const previousVal = overrideYmSelect.value;
+            overrideYmSelect.innerHTML = '';
             availableMonths.forEach(m => {
                 const opt = document.createElement('option');
                 opt.value = m.code;
                 opt.textContent = m.name;
                 overrideYmSelect.appendChild(opt);
             });
+
+            if (previousVal && availableMonths.some(m => m.code === previousVal)) {
+                overrideYmSelect.value = previousVal;
+            } else if (availableMonths.some(m => m.code === curCode)) {
+                overrideYmSelect.value = curCode;
+            } else if (availableMonths.length > 0) {
+                overrideYmSelect.value = availableMonths[0].code;
+            }
+
             populateDaysForSelectedMonth();
         }
 
@@ -1280,6 +1326,52 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    const backupDbBtn = document.getElementById('backupDbBtn');
+    if (backupDbBtn) {
+        backupDbBtn.addEventListener('click', async () => {
+            try {
+                showToast('info', 'Zaxira', 'Ma\'lumotlar bazasi yuklab olinmoqda...');
+                await downloadWithAuth(getApiUrl('/api/admin/backup-db'), 'kiosk_data_backup.db');
+            } catch (err) {
+                showToast('error', 'Xatolik', err.message || 'Zaxirani yuklab bo\'lmadi');
+            }
+        });
+    }
+
+    const restoreDbFileInput = document.getElementById('restoreDbFileInput');
+    if (restoreDbFileInput) {
+        restoreDbFileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            if (!confirm(`Haqiqatan ham '${file.name}' zaxirasidan ma'lumotlar bazasini qayta tiklamoqchimisiz?`)) {
+                restoreDbFileInput.value = '';
+                return;
+            }
+            const formData = new FormData();
+            formData.append('file', file);
+            showToast('info', 'Tiklanmoqda', 'Baza qayta tiklanmoqda...');
+            try {
+                const res = await fetch(getApiUrl('/api/admin/restore-db'), {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: formData
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('success', 'Muvaffaqiyatli', data.message || 'Baza muvaffaqiyatli tiklandi!');
+                    fetchStats();
+                    fetchUploadLogs();
+                } else {
+                    showToast('error', 'Xatolik', data.error || 'Tiklashda xatolik yuz berdi');
+                }
+            } catch (err) {
+                showToast('error', 'Xatolik', err.message || 'Tiklashda xatolik yuz berdi');
+            } finally {
+                restoreDbFileInput.value = '';
+            }
+        });
+    }
+
     function handleFileUpload(file) {
         if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
             showToast('warning', 'Fayl Formati Xato', 'Iltimos, faqat Excel fayllarini (.xlsx, .xls) yuklang!');
@@ -1414,12 +1506,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast('error', 'Saqlashda Xatolik', 'Sozlamalarni saqlashda xatolik yuz berdi!');
             }
         });
-    }
-
-    function renderDashboard(stats) {
-        fullBackendStats = stats;
-        populatePeriodDropdowns(stats);
-        applyPeriodFilter();
     }
 
     function populatePeriodDropdowns(stats) {

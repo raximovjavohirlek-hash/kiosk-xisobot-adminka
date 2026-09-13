@@ -1,0 +1,135 @@
+[
+  {
+    "username": "Javohir",
+    "password": "pbkdf2:sha256:1000000$S67S2lIHELAeU6JF$34704d50a26e68010f82c4a8b2f0407239397258d16ed5ee229966bd651920f3",
+    "name": "Bosh Administrator (Javohir)",
+    "role": "admin",
+    "created_at": "2026-08-30 14:00:00",
+    "is_active": true
+  },
+  {
+    "username": "xodim1",
+    "password": "pbkdf2:sha256:1000000$I56DgXtnyViL9eQs$88a8c03160e737942c5afe5671d6732c05d327e02fa1d0a8594aa562f49efb22",
+    "name": "Test Xodim",
+    "role": "user",
+    "created_at": "2026-08-30 14:32:28",
+    "is_active": true
+  },
+  {
+    "username": "samarqandkiosk",
+    "password": "pbkdf2:sha256:1000000$oSBIKTxZAaJZ1kfI$5c330c33adb7b141b2da9831e20a57888569c0300dfbbc4d5f00dc01a65c83c4",
+    "name": "Samarqand Kassa",
+    "role": "user",
+    "region": "samarqandkiosk@railway.uz",
+    "is_active": true,
+    "created_at": "2026-09-13 15:54:50"
+  },
+  {
+    "username": "urganchkiosk",
+    "password": "pbkdf2:sha256:1000000$HCEY9ia5lzoAa8Va$7a34428f75451e69dfa86b35e8be7bb7d9ccacebddcf55d044e5d002974ef2c6",
+    "name": "Urganch Kassa",
+    "role": "user",
+    "region": "urganchkiosk@railway.uz",
+    "is_active": true,
+    "created_at": "2026-09-13 15:54:51"
+  },
+  {
+    "username": "khivakiosk",
+    "password": "pbkdf2:sha256:1000000$6UzuPC3zWxP0tipI$b06b831a3cc82a148adf86b4159418b6e751c34309abb58628c5262b8e3bf66e",
+    "name": "Xiva Kassa",
+    "role": "user",
+    "region": "khivakiosk@railway.uz",
+    "is_active": true,
+    "created_at": "2026-09-13 15:54:51"
+  },
+  {
+    "username": "navoiykiosk",
+    "password": "pbkdf2:sha256:1000000$nFViwzv5MOOh3ro4$d466bb0957d6fd80d116e9ea779b3b69395a71090e4e16524507a65f487e97f6",
+    "name": "Navoiy Kassa",
+    "role": "user",
+    "region": "navoiykiosk@railway.uz",
+    "is_active": true,
+    "created_at": "2026-09-13 15:54:51"
+  },
+  {
+    "username": "buxorokiosk",
+    "password": "pbkdf2:sha256:1000000$4vPB89naUTyzPhlc$f97dba613623892f47fadec2e56bc5c04adcd0387e1839af0bc1a4246ca08946",
+    "name": "Buxoro Kassa",
+    "role": "user",
+    "region": "buxorokiosk@railway.uz",
+    "is_active": true,
+    "created_at": "2026-09-13 15:54:52"
+  },
+  {
+    "username": "qongirotkiosk",
+    "password": "pbkdf2:sha256:1000000$2KRTLO5umhLZzy4U$b77c6a585e29dbb38e8112d5111e4f8a722959a0a0ca83da0e60ba39aebb0a0c",
+    "name": "Qo'ng'irot Kassa",
+    "role": "user",
+    "region": "qongirotkiosk@railway.uz",
+    "is_active": true,
+    "created_at": "2026-09-13 15:54:52"
+  },
+  {
+    "username": "nukuskiosk",
+    "password": "pbkdf2:sha256:1000000$dY8k0v0543KxilIE$7de8c2bd43ae6631055471b080ca8b624af0bfc30f0dd3332827ea926195b715",
+    "name": "Nukus Kassa",
+    "role": "user",
+    "region": "nukuskiosk@railway.uz",
+    "is_active": true,
+    "created_at": "2026-09-13 15:54:52"
+  },
+  {
+    "username": "andijonkiosk",
+    "password": "pbkdf2:sha256:1000000$iZ8nczII3QDofMwL$7d11d25161c6ccbb89800cc2828cb9bc5faeed69e30add275613e3ec27aecf56",
+    "name": "Andijon Kassa",
+    "role": "user",
+    "region": "andijonkiosk@railway.uz",
+    "is_active": true,
+    "created_at": "2026-09-13 15:54:53"
+  },
+  {
+    "username": "qoqonkiosk",
+    "password": "pbkdf2:sha256:1000000$CorGfMdxlFGqY07l$1625658b5e685dd0839a303455ebbe7ee49f3fcf846a0239810c40a2819f8293",
+    "name": "Qo'qon Kassa",
+    "role": "user",
+    "region": "qoqonkiosk@railway.uz",
+    "is_active": true,
+    "created_at": "2026-09-13 15:54:53"
+  },
+  {
+    "username": "margilonkiosk",
+    "password": "pbkdf2:sha256:1000000$gOysTnyKFoUKM9TK$f325199a2257b94fd542744a46160b72f7a3cd1a6a4bfa8c778969020365b5ad",
+    "name": "Marg'ilon Kassa",
+    "role": "user",
+    "region": "margilonkiosk@railway.uz",
+    "is_active": true,
+    "created_at": "2026-09-13 15:54:53"
+  },
+  {
+    "username": "namangankiosk",
+    "password": "pbkdf2:sha256:1000000$t42uVLlFaoQjKuU3$41b155453cb14798b428167d30276199e9c3d74157c85e341aeedf0c8d3af032",
+    "name": "Namangan Kassa",
+    "role": "user",
+    "region": "namangankiosk@railway.uz",
+    "is_active": true,
+    "created_at": "2026-09-13 15:54:53"
+  },
+  {
+    "username": "termizkiosk",
+    "password": "pbkdf2:sha256:1000000$pY8PXJbPixjANiYk$4fdc8b21a6b18c9503f81331f25a7aec97f06c34b2f18b634ad36689a69b0eac",
+    "name": "Termiz Kassa",
+    "role": "user",
+    "region": "termizkiosk@railway.uz",
+    "is_active": true,
+    "created_at": "2026-09-13 15:54:54"
+  },
+  {
+    "username": "qarshikiosk",
+    "password": "pbkdf2:sha256:1000000$8YPYIo1nAoXtcQ43$b8b891db7c7121d509c6a7d650220ac0536caca4c4cc496849ceeefb5632fa35",
+    "name": "Qarshi Kassa",
+    "role": "user",
+    "region": "qarshikiosk@railway.uz",
+    "is_active": true,
+    "created_at": "2026-09-13 15:54:54"
+  }
+]

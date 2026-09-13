@@ -1,3 +1,8 @@
+function intVal(val) {
+    if (val === null || val === undefined) return 0;
+    const n = parseInt(val, 10);
+    return isNaN(n) ? 0 : n;
+}
 
 function formatMln(num) {
     if (!num || isNaN(num)) return '0 mln';
@@ -58,8 +63,22 @@ async function downloadWithAuth(url, fallbackFilename) {
         throw new Error(message);
     }
     const disposition = resp.headers.get('Content-Disposition') || '';
-    const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
-    const filename = match ? decodeURIComponent(match[1]) : fallbackFilename;
+    let filename = fallbackFilename;
+    if (disposition) {
+        const rfcMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+        if (rfcMatch) {
+            try {
+                filename = decodeURIComponent(rfcMatch[1]);
+            } catch (e) {
+                filename = fallbackFilename;
+            }
+        } else {
+            const stdMatch = disposition.match(/filename="?([^";]+)"?/i);
+            if (stdMatch) {
+                filename = stdMatch[1];
+            }
+        }
+    }
     const blob = await resp.blob();
     const blobUrl = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -511,22 +530,33 @@ document.addEventListener('DOMContentLoaded', () => {
             return false;
         }
 
+        let user;
         try {
-            const user = JSON.parse(userStr);
-            if (systemLoginGateModal) systemLoginGateModal.style.display = 'none';
-            if (appContainer) appContainer.style.display = 'block';
+            user = JSON.parse(userStr);
+        } catch (e) {
+            handleUnauthorizedAccess("Avtorizatsiya ma'lumotlari yaroqsiz.");
+            return false;
+        }
 
-            if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+        if (systemLoginGateModal) systemLoginGateModal.style.display = 'none';
+        if (appContainer) appContainer.style.display = 'block';
 
-            const userRoleBadge = document.getElementById('userRoleBadge');
-            if (userRoleBadge) {
-                userRoleBadge.innerHTML = `<i class="fa-solid fa-user-shield"></i> ${user.name || user.username} (${user.role === 'admin' ? 'Admin' : 'Foydalanuvchi'})`;
-            }
+        if (logoutBtn) logoutBtn.style.display = 'inline-flex';
 
-            if (adminTabBtn) {
-                adminTabBtn.style.display = (user.role === 'admin') ? 'inline-flex' : 'none';
-            }
+        const userRoleBadge = document.getElementById('userRoleBadge');
+        if (userRoleBadge) {
+            userRoleBadge.innerHTML = `<i class="fa-solid fa-user-shield"></i> ${user.name || user.username} (${user.role === 'admin' ? 'Admin' : 'Foydalanuvchi'})`;
+        }
 
+        if (adminTabBtn) {
+            adminTabBtn.style.display = (user.role === 'admin') ? 'inline-flex' : 'none';
+        }
+        const headerUploadBtn = document.getElementById('headerUploadBtn');
+        if (headerUploadBtn) {
+            headerUploadBtn.style.display = (user.role === 'admin') ? 'inline-flex' : 'none';
+        }
+
+        try {
             fetchStats();
             if (user.role === 'admin') {
                 populateOverrideDropdowns();
@@ -534,11 +564,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 fetchOverrides();
                 fetchMappings();
             }
-            return true;
-        } catch (e) {
-            handleUnauthorizedAccess();
-            return false;
+        } catch (err) {
+            console.error('[Dashboard Init Error]:', err);
         }
+        return true;
     }
 
     // System Mandatory Login Form Handler
@@ -586,7 +615,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password })
             })
-            .then(res => res.json())
+            .then(res => {
+                if (!res.ok && res.status >= 500) {
+                    throw new Error("Server vaqtincha javob bermayapti. Render bepul serveri uyg'onayotgan bo'lishi mumkin, 15-20 soniya kuting.");
+                }
+                return res.json();
+            })
             .then(data => {
                 if (data.success && data.token) {
                     localStorage.setItem('auth_token', data.token);
@@ -596,6 +630,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     if (systemLoginGateModal) systemLoginGateModal.style.display = 'none';
                     if (systemLoginError) systemLoginError.style.display = 'none';
+                    const appContainer = document.getElementById('appContainer');
+                    if (appContainer) appContainer.style.display = 'block';
 
                     showToast('success', 'Xush Kelibsiz!', data.message || 'Tizimga kirdingiz');
                     checkAppAuthentication();
@@ -608,7 +644,12 @@ document.addEventListener('DOMContentLoaded', () => {
             })
             .catch(err => {
                 if (systemLoginError) {
-                    systemLoginError.textContent = "Ulanishda xatolik: " + err;
+                    const msg = String(err && err.message ? err.message : err);
+                    if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+                        systemLoginError.textContent = "Server uyg'onmoqda (Render free tier). Iltimos, 15-20 soniya kutib qayta 'Kirish' tugmasini bosing.";
+                    } else {
+                        systemLoginError.textContent = "Ulanishda xatolik: " + msg;
+                    }
                     systemLoginError.style.display = 'block';
                 }
             })
@@ -698,6 +739,11 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.classList.add('active');
             const targetSection = document.getElementById(targetSubtab);
             if (targetSection) targetSection.classList.add('active');
+
+            if (targetSubtab === 'admin-override') {
+                populateOverrideDropdowns(fullBackendStats);
+                fetchOverrides();
+            }
         });
     });
 
@@ -753,10 +799,26 @@ document.addEventListener('DOMContentLoaded', () => {
     if (downloadBtn) {
         downloadBtn.addEventListener('click', async (e) => {
             e.preventDefault();
-            const period = currentSelectedPeriod || 'all';
+            let period = currentSelectedPeriod || 'all';
+            if (period === 'latest') {
+                if (fullBackendStats && fullBackendStats.available_months && fullBackendStats.available_months.length > 0) {
+                    period = fullBackendStats.available_months[0].code;
+                } else {
+                    period = '2026-08';
+                }
+            }
+            let displayName = period;
+            if (period === 'ytd') displayName = '2026 YTD';
+            else if (period === 'all') displayName = 'Barcha Oylar';
+            else if (fullBackendStats && fullBackendStats.available_months) {
+                const found = fullBackendStats.available_months.find(m => m.code === period);
+                if (found) displayName = found.name;
+            }
+
             const downloadUrl = getApiUrl(`/api/download?period=${encodeURIComponent(period)}`);
             try {
-                await downloadWithAuth(downloadUrl, `hisobot-${period}.xlsx`);
+                showToast('info', 'Excel Hisobot', `${displayName} hisoboti tayyorlanmoqda va yuklanmoqda...`);
+                await downloadWithAuth(downloadUrl, `Kiosk_Hisobot_${period}.xlsx`);
             } catch (err) {
                 showToast('error', 'Xatolik', err.message || "Faylni yuklab bo'lmadi.");
             }
@@ -834,8 +896,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (ym && ym.includes('-')) {
             const parts = ym.split('-');
-            const year = intVal(parts[0]);
-            const month = intVal(parts[1]);
+            const year = parseInt(parts[0], 10) || 2026;
+            const month = parseInt(parts[1], 10) || 1;
             if (year > 2000 && month >= 1 && month <= 12) {
                 const daysInMonth = new Date(year, month, 0).getDate();
                 for (let d = 1; d <= daysInMonth; d++) {
@@ -860,28 +922,69 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function populateOverrideDropdowns(stats) {
         if (overrideYmSelect) {
-            overrideYmSelect.innerHTML = '';
-            let availableMonths = (stats && stats.available_months && stats.available_months.length > 0)
+            const MONTH_NAMES = {
+                '01': 'Yanvar', '02': 'Fevral', '03': 'Mart', '04': 'Aprel',
+                '05': 'May', '06': 'Iyun', '07': 'Iyul', '08': 'Avgust',
+                '09': 'Sentabr', '10': 'Oktabr', '11': 'Noyabr', '12': 'Dekabr'
+            };
+
+            const now = new Date();
+            const curY = now.getFullYear();
+            const curM = String(now.getMonth() + 1).padStart(2, '0');
+            const curCode = `${curY}-${curM}`;
+            const curName = `${MONTH_NAMES[curM] || curM} ${curY}`;
+
+            let availableMonths = [];
+            const src = (stats && stats.available_months && stats.available_months.length > 0)
                 ? stats.available_months
                 : (fullBackendStats && fullBackendStats.available_months && fullBackendStats.available_months.length > 0)
                     ? fullBackendStats.available_months
-                    : [
-                        { code: '2026-08', name: 'Avgust 2026' },
-                        { code: '2026-07', name: 'Iyul 2026' },
-                        { code: '2026-06', name: 'Iyun 2026' },
-                        { code: '2026-05', name: 'May 2026' },
-                        { code: '2026-04', name: 'Aprel 2026' },
-                        { code: '2026-03', name: 'Mart 2026' },
-                        { code: '2026-02', name: 'Fevral 2026' },
-                        { code: '2026-01', name: 'Yanvar 2026' }
-                    ];
+                    : [];
 
+            if (src.length > 0) {
+                availableMonths = src.map(m => ({ ...m }));
+            }
+
+            // Always ensure the current real calendar month (e.g. Sentabr 2026) is available at the top!
+            if (!availableMonths.some(m => m.code === curCode)) {
+                availableMonths.unshift({ code: curCode, name: curName });
+            }
+
+            // Fallback past months if empty
+            const fallbackList = [
+                { code: '2026-09', name: 'Sentabr 2026' },
+                { code: '2026-08', name: 'Avgust 2026' },
+                { code: '2026-07', name: 'Iyul 2026' },
+                { code: '2026-06', name: 'Iyun 2026' },
+                { code: '2026-05', name: 'May 2026' },
+                { code: '2026-04', name: 'Aprel 2026' },
+                { code: '2026-03', name: 'Mart 2026' },
+                { code: '2026-02', name: 'Fevral 2026' },
+                { code: '2026-01', name: 'Yanvar 2026' }
+            ];
+            fallbackList.forEach(fb => {
+                if (!availableMonths.some(m => m.code === fb.code)) {
+                    availableMonths.push(fb);
+                }
+            });
+
+            const previousVal = overrideYmSelect.value;
+            overrideYmSelect.innerHTML = '';
             availableMonths.forEach(m => {
                 const opt = document.createElement('option');
                 opt.value = m.code;
                 opt.textContent = m.name;
                 overrideYmSelect.appendChild(opt);
             });
+
+            if (previousVal && availableMonths.some(m => m.code === previousVal)) {
+                overrideYmSelect.value = previousVal;
+            } else if (availableMonths.some(m => m.code === curCode)) {
+                overrideYmSelect.value = curCode;
+            } else if (availableMonths.length > 0) {
+                overrideYmSelect.value = availableMonths[0].code;
+            }
+
             populateDaysForSelectedMonth();
         }
 
@@ -1023,6 +1126,28 @@ document.addEventListener('DOMContentLoaded', () => {
                         const regionLabel = u.region
                             ? ((currentMappings[u.region] && currentMappings[u.region].station) || u.region)
                             : (u.role === 'admin' ? "Barchasi" : "Cheklanmagan");
+                        const isMaster = (u.username === 'admin' || u.username.toLowerCase() === 'javohir');
+                        const isActive = u.is_active !== false;
+                        const statusBadge = isActive
+                            ? `<span class="badge badge-emerald" style="padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700;">Faol</span>`
+                            : `<span class="badge badge-rose" style="padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700;">Nofaol</span>`;
+
+                        const actionButtons = isMaster
+                            ? '<span style="font-size:11px; color:var(--text-secondary);">(Bosh Admin)</span>'
+                            : `
+                                <div style="display: flex; align-items: center; gap: 4px;">
+                                    <button class="btn-icon-only btn-sm" style="color:${isActive ? 'var(--accent-amber)' : 'var(--accent-emerald)'}; padding: 2px 6px;" title="${isActive ? 'Faolsizlantirish' : 'Faollashtirish'}" onclick="toggleUserStatus('${u.username}', ${isActive ? 'false' : 'true'})">
+                                        <i class="fa-solid ${isActive ? 'fa-ban' : 'fa-check'}"></i>
+                                    </button>
+                                    <button class="btn-icon-only btn-sm" style="color:var(--accent-cyan); padding: 2px 6px;" title="Parolni o'zgartirish" onclick="promptResetPassword('${u.username}')">
+                                        <i class="fa-solid fa-key"></i>
+                                    </button>
+                                    <button class="btn-icon-only btn-sm" style="color:var(--accent-rose); padding: 2px 6px;" title="O'chirish" onclick="deleteUserAccount('${u.username}')">
+                                        <i class="fa-solid fa-trash"></i>
+                                    </button>
+                                </div>
+                            `;
+
                         return `
                         <tr>
                             <td><strong>${u.username}</strong></td>
@@ -1033,9 +1158,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                 </span>
                             </td>
                             <td>${regionLabel}</td>
-                            <td>
-                                ${u.username !== 'admin' ? `<button class="btn-icon-only btn-sm" style="color:var(--accent-rose); padding: 2px 6px;" title="O'chirish" onclick="deleteUserAccount('${u.username}')"><i class="fa-solid fa-trash"></i></button>` : '<span style="font-size:11px; color:var(--text-secondary);">(Bosh Admin)</span>'}
-                            </td>
+                            <td>${statusBadge}</td>
+                            <td>${actionButtons}</td>
                         </tr>
                     `;
                     }).join('');
@@ -1096,6 +1220,45 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    window.toggleUserStatus = function(username, newStatus) {
+        const actionText = newStatus ? "faollashtirmoqchimisiz" : "faolsizlantirmoqchimisiz";
+        if (!confirm(`Haqiqatan ham '${username}' hisobini ${actionText}?`)) return;
+        fetch(getApiUrl(`/api/users/${username}`), {
+            method: 'PUT',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ is_active: newStatus })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast('success', 'Muvaffaqiyatli', data.message);
+                fetchUsers();
+            } else {
+                showToast('error', 'Xatolik', data.error);
+            }
+        })
+        .catch(err => showToast('error', 'Xatolik', err.message));
+    };
+
+    window.promptResetPassword = function(username) {
+        const newPassword = prompt(`'${username}' uchun yangi parolni kiriting:`);
+        if (!newPassword || !newPassword.trim()) return;
+        fetch(getApiUrl(`/api/users/${username}`), {
+            method: 'PUT',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ password: newPassword.trim() })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast('success', 'Parol O\'zgartirildi', data.message);
+            } else {
+                showToast('error', 'Xatolik', data.error);
+            }
+        })
+        .catch(err => showToast('error', 'Xatolik', err.message));
+    };
+
     window.deleteUserAccount = function(username) {
         if (!confirm(`Haqiqatan ham '${username}' foydalanuvchisini o'chirmoqchimisiz?`)) return;
         fetch(getApiUrl(`/api/users/${username}`), {
@@ -1135,12 +1298,76 @@ document.addEventListener('DOMContentLoaded', () => {
                 handleFileUpload(e.dataTransfer.files[0]);
             }
         });
+
+        dropzone.addEventListener('click', (e) => {
+            if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) {
+                const fi = document.getElementById('fileInput');
+                if (fi) fi.click();
+            }
+        });
     }
+
+    window.triggerExcelUpload = function() {
+        const adminTabBtn = document.querySelector('.tab-btn[data-tab="tab-admin"]');
+        if (adminTabBtn) adminTabBtn.click();
+        const logsSubnavBtn = document.querySelector('.admin-subnav-btn[data-subtab="admin-logs"]');
+        if (logsSubnavBtn) logsSubnavBtn.click();
+        setTimeout(() => {
+            const fi = document.getElementById('fileInput');
+            if (fi) fi.click();
+        }, 100);
+    };
 
     if (fileInput) {
         fileInput.addEventListener('change', (e) => {
             if (e.target.files.length > 0) {
                 handleFileUpload(e.target.files[0]);
+            }
+        });
+    }
+
+    const backupDbBtn = document.getElementById('backupDbBtn');
+    if (backupDbBtn) {
+        backupDbBtn.addEventListener('click', async () => {
+            try {
+                showToast('info', 'Zaxira', 'Ma\'lumotlar bazasi yuklab olinmoqda...');
+                await downloadWithAuth(getApiUrl('/api/admin/backup-db'), 'kiosk_data_backup.db');
+            } catch (err) {
+                showToast('error', 'Xatolik', err.message || 'Zaxirani yuklab bo\'lmadi');
+            }
+        });
+    }
+
+    const restoreDbFileInput = document.getElementById('restoreDbFileInput');
+    if (restoreDbFileInput) {
+        restoreDbFileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            if (!confirm(`Haqiqatan ham '${file.name}' zaxirasidan ma'lumotlar bazasini qayta tiklamoqchimisiz?`)) {
+                restoreDbFileInput.value = '';
+                return;
+            }
+            const formData = new FormData();
+            formData.append('file', file);
+            showToast('info', 'Tiklanmoqda', 'Baza qayta tiklanmoqda...');
+            try {
+                const res = await fetch(getApiUrl('/api/admin/restore-db'), {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: formData
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('success', 'Muvaffaqiyatli', data.message || 'Baza muvaffaqiyatli tiklandi!');
+                    fetchStats();
+                    fetchUploadLogs();
+                } else {
+                    showToast('error', 'Xatolik', data.error || 'Tiklashda xatolik yuz berdi');
+                }
+            } catch (err) {
+                showToast('error', 'Xatolik', err.message || 'Tiklashda xatolik yuz berdi');
+            } finally {
+                restoreDbFileInput.value = '';
             }
         });
     }
@@ -1279,12 +1506,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast('error', 'Saqlashda Xatolik', 'Sozlamalarni saqlashda xatolik yuz berdi!');
             }
         });
-    }
-
-    function renderDashboard(stats) {
-        fullBackendStats = stats;
-        populatePeriodDropdowns(stats);
-        applyPeriodFilter();
     }
 
     function populatePeriodDropdowns(stats) {
@@ -1742,18 +1963,31 @@ document.addEventListener('DOMContentLoaded', () => {
         uploadLogsTableBody.innerHTML = '';
 
         if (!logs || logs.length === 0) {
-            uploadLogsTableBody.innerHTML = '<tr><td colspan="5" class="empty-row">Audit tarixi topilmadi</td></tr>';
+            uploadLogsTableBody.innerHTML = '<tr><td colspan="9" class="empty-row">Audit tarixi topilmadi</td></tr>';
             return;
         }
 
         logs.forEach((log, idx) => {
             const tr = document.createElement('tr');
+            const totalRows = (log.total_rows || log.rows || 0).toLocaleString();
+            const relRows = log.relevant_rows !== undefined ? log.relevant_rows.toLocaleString() : '-';
+            const newTix = log.new_tickets !== undefined ? log.new_tickets.toLocaleString() : '-';
+            const dupTix = log.duplicate_tickets !== undefined ? log.duplicate_tickets.toLocaleString() : '-';
+            const totSum = (log.total_amount || 0) > 0 ? (log.total_amount.toLocaleString() + " so'm") : '-';
+            const isSuccess = log.status && log.status.toLowerCase().includes('muvaffaq');
+            const statusClass = isSuccess ? 'status-badge' : 'badge badge-rose';
+            const statusIcon = isSuccess ? 'fa-check' : 'fa-triangle-exclamation';
+
             tr.innerHTML = `
                 <td><strong>${idx + 1}</strong></td>
                 <td><i class="fa-solid fa-file-excel" style="color: var(--accent-emerald); margin-right: 6px;"></i> <strong>${log.filename}</strong></td>
-                <td><strong>${(log.rows || 0).toLocaleString()} ta qator</strong></td>
-                <td>${log.timestamp}</td>
-                <td><span class="status-badge" style="display: inline-flex;"><i class="fa-solid fa-check"></i> ${log.status}</span></td>
+                <td><strong>${totalRows}</strong></td>
+                <td>${relRows}</td>
+                <td><strong style="color: var(--accent-cyan);">${newTix}</strong></td>
+                <td><span style="color: var(--accent-amber);">${dupTix}</span></td>
+                <td>${totSum}</td>
+                <td style="font-size: 12px; color: var(--text-secondary);">${log.timestamp}</td>
+                <td><span class="${statusClass}" style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 6px; font-size: 11px;"><i class="fa-solid ${statusIcon}"></i> ${log.status}</span></td>
             `;
             uploadLogsTableBody.appendChild(tr);
         });

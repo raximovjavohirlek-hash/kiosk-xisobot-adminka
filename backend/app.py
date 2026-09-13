@@ -41,9 +41,14 @@ ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
     'http://localhost:5050,http://127.0.0.1:5050,https://kiosk-xisobot-adminka.pages.dev,https://kiosk-hisobot.pages.dev'
 ).split(',') if o.strip()]
 CORS(app, origins=ALLOWED_ORIGINS + [r'https://.*\.pages\.dev'], supports_credentials=True)
-
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or os.urandom(32).hex()
-app.config['UPLOAD_FOLDER'] = os.path.dirname(os.path.abspath(__file__))
+
+DATA_DIR = os.environ.get('DATA_DIR')
+if DATA_DIR:
+    os.makedirs(DATA_DIR, exist_ok=True)
+    app.config['UPLOAD_FOLDER'] = DATA_DIR
+else:
+    app.config['UPLOAD_FOLDER'] = os.path.dirname(os.path.abspath(__file__))
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB limit
 app.config['ADMIN_PASSWORD'] = os.environ.get('ADMIN_PASSWORD', 'Javo!QAZ')
 
@@ -2010,6 +2015,33 @@ def start_self_ping():
     thread = threading.Thread(target=ping_worker, daemon=True)
     thread.start()
 
+@app.route('/api/admin/backup-db', methods=['GET'])
+@require_auth(role='admin')
+def backup_db():
+    db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+    if not os.path.exists(db_path):
+        return jsonify({'error': 'Baza topilmadi'}), 404
+    return send_file(
+        db_path,
+        as_attachment=True,
+        download_name=f'kiosk_data_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.db'
+    )
+
+@app.route('/api/admin/restore-db', methods=['POST'])
+@require_auth(role='admin')
+def restore_db():
+    if 'file' not in request.files:
+        return jsonify({'error': 'Fayl tanlanmagan'}), 400
+    file = request.files['file']
+    if not file.filename.endswith('.db'):
+        return jsonify({'error': 'Faqat .db formatdagi fayllar qabul qilinadi'}), 400
+    
+    db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+    file.save(db_path)
+    invalidate_stats_cache()
+    warmup_stats_cache()
+    return jsonify({'success': True, 'message': 'Ma\'lumotlar bazasi muvaffaqiyatli tiklandi!'})
+
 def warmup_stats_cache():
     try:
         db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
@@ -2024,6 +2056,23 @@ def warmup_stats_cache():
             stats = process_excel(data_path, report_path)
             db_stats = get_all_stats_from_db(db_path, email_map) or stats
         
+        # Auto-seed September if missing in monthly_data
+        if db_stats and '2026-09' not in db_stats.get('monthly_data', {}):
+            sep_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'excellar', 'sentyabr')
+            if not os.path.exists(sep_dir):
+                sep_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'excellar', 'sentyabr')
+            if os.path.exists(sep_dir):
+                from database import smart_parse_and_save_excel
+                for fn in sorted(os.listdir(sep_dir)):
+                    if fn.endswith('.xlsx') and not fn.startswith('~$'):
+                        fpath = os.path.join(sep_dir, fn)
+                        try:
+                            with open(fpath, 'rb') as fh:
+                                smart_parse_and_save_excel(db_path, fh.read(), fn, email_map)
+                        except Exception as e_sep:
+                            print(f"[Seed] Error parsing {fn}:", e_sep)
+                db_stats = get_all_stats_from_db(db_path, email_map) or db_stats
+
         global STATS_CACHE
         STATS_CACHE = db_stats
         print("[DB] SQLite database initialized & pre-warmed successfully!")

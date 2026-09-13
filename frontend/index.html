@@ -698,9 +698,18 @@
                                 <h2><i class="fa-solid fa-clock-rotate-left" style="color: var(--accent-amber);"></i> Excel Fayllar Yuklash Audit Tarixi</h2>
                                 <p class="section-desc">Tizimga kiritilgan oxirgi fayllar va yangilanish jurnali</p>
                             </div>
-                            <button type="button" class="btn btn-accent btn-sm" onclick="document.getElementById('fileInput').click()" style="display: inline-flex; align-items: center; gap: 8px; border-radius: 8px; font-weight: 700; padding: 6px 14px;">
-                                <i class="fa-solid fa-cloud-arrow-up"></i> Yangi Fayl Yuklash
-                            </button>
+                            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                                <button type="button" class="btn btn-outline btn-sm" id="backupDbBtn" title="SQLite ma'lumotlar bazasi zaxirasini (.db) yuklab olish" style="display: inline-flex; align-items: center; gap: 6px; border-radius: 8px; font-weight: 600; padding: 6px 12px; border-color: rgba(56, 189, 248, 0.4); color: var(--accent-cyan);">
+                                    <i class="fa-solid fa-download"></i> Baza Zaxirasi (.db)
+                                </button>
+                                <input type="file" id="restoreDbFileInput" accept=".db" hidden>
+                                <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('restoreDbFileInput').click()" title="Baza zaxirasidan (.db) qayta tiklash" style="display: inline-flex; align-items: center; gap: 6px; border-radius: 8px; font-weight: 600; padding: 6px 12px; border-color: rgba(16, 185, 129, 0.4); color: var(--accent-emerald);">
+                                    <i class="fa-solid fa-upload"></i> Bazani Tiklash
+                                </button>
+                                <button type="button" class="btn btn-accent btn-sm" onclick="document.getElementById('fileInput').click()" style="display: inline-flex; align-items: center; gap: 8px; border-radius: 8px; font-weight: 700; padding: 6px 14px;">
+                                    <i class="fa-solid fa-cloud-arrow-up"></i> Yangi Fayl Yuklash
+                                </button>
+                            </div>
                         </div>
                     <div class="table-responsive">
                         <table class="data-table">

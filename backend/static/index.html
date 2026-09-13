@@ -68,6 +68,9 @@
                     <button class="btn-icon-only" id="refreshBtn" title="Ma'lumotlarni yangilash">
                         <i class="fa-solid fa-rotate-right"></i>
                     </button>
+                    <button class="btn btn-accent btn-compact" id="headerUploadBtn" title="Railway Admin Excel faylini yuklash" onclick="triggerExcelUpload()" style="display: none; height: 38px; padding: 0 16px; font-weight: 700; border-radius: 10px; background: linear-gradient(135deg, #0ea5e9, #0284c7); color: #fff; border: none; cursor: pointer; align-items: center; gap: 8px;">
+                        <i class="fa-solid fa-cloud-arrow-up"></i> <span>Excel Yuklash</span>
+                    </button>
                     <a href="#" class="btn-excel-download" id="downloadBtn" title="Excel hisobotini yuklab olish">
                         <i class="fa-solid fa-file-excel"></i> <span>Excel Hisobot</span>
                     </a>
@@ -108,27 +111,6 @@
                     </div>
                     <span style="font-size: 12px; opacity: 0.7;"><i class="fa-solid fa-clock-rotate-left"></i> Dinamik Saralangan Tahlillar</span>
                 </div>
-
-                <!-- Upload & File Drag-Drop Area -->
-                <section class="upload-section" style="display: none;">
-                    <div class="dropzone glow-border" id="dropzone">
-                        <input type="file" id="fileInput" accept=".xlsx, .xls" hidden>
-                        <div class="dropzone-content">
-                            <div class="upload-icon-pulse">
-                                <i class="fa-solid fa-cloud-arrow-up"></i>
-                            </div>
-                            <h3>Adminka Excel Faylini Shu Yerga Tashlang</h3>
-                            <p>Yangi yuklangan <code>data.xlsx</code> faylini kiritsangiz, barcha 15 ta kassa bo'yicha hisobot darhol qayta ishlanadi</p>
-                            <button class="btn btn-accent" onclick="document.getElementById('fileInput').click()">
-                                <i class="fa-solid fa-folder-open"></i> Faylni Tanlash
-                            </button>
-                        </div>
-                        <div class="upload-spinner" id="uploadSpinner" style="display: none;">
-                            <div class="spinner-ring"></div>
-                            <p id="spinnerText">Fayl o'qilmoqda va Excel hisobot shakllantirilmoqda...</p>
-                        </div>
-                    </div>
-                </section>
 
                 <!-- Executive Summary Real KPI Cards -->
                 <section class="kpi-grid director-kpi-grid">
@@ -479,7 +461,7 @@
                         <i class="fa-solid fa-at"></i> Pochta Biriktirmalari
                     </button>
                     <button class="admin-subnav-btn" data-subtab="admin-logs">
-                        <i class="fa-solid fa-clock-rotate-left"></i> Yuklash Tarixi
+                        <i class="fa-solid fa-cloud-arrow-up"></i> Excel Yuklash & Tarix
                     </button>
                 </nav>
 
@@ -545,11 +527,12 @@
                                             <th>Ism</th>
                                             <th>Rol</th>
                                             <th>Kassa</th>
-                                            <th>Amal</th>
+                                            <th>Holat</th>
+                                            <th>Amallar</th>
                                         </tr>
                                     </thead>
                                     <tbody id="usersTableBody">
-                                        <tr><td colspan="5" class="empty-row">Foydalanuvchilar yuklanmoqda...</td></tr>
+                                        <tr><td colspan="6" class="empty-row">Foydalanuvchilar yuklanmoqda...</td></tr>
                                     </tbody>
                                 </table>
                             </div>
@@ -672,29 +655,80 @@
                 </section>
                 </div>
 
-                <!-- Excel Upload Audit Logs -->
+                <!-- Excel Upload Area & Audit Logs -->
                 <div class="admin-subsection" id="admin-logs">
-                <section class="table-section glass-card">
-                    <div class="card-header flex-between">
-                        <div>
-                            <h2><i class="fa-solid fa-clock-rotate-left" style="color: var(--accent-amber);"></i> Excel Fayllar Yuklash Audit Tarixi</h2>
-                            <p class="section-desc">Tizimga kiritilgan oxirgi fayllar va yangilanish jurnali</p>
+                    <!-- Excel Drag-Drop & Upload Card -->
+                    <section class="upload-section glass-card glow-border" style="margin-bottom: 24px; padding: 24px; border: 1px solid var(--border-glass); border-radius: 16px;">
+                        <div class="card-header flex-between" style="margin-bottom: 16px;">
+                            <div>
+                                <h2 style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0 0 4px 0;">
+                                    <i class="fa-solid fa-cloud-arrow-up" style="color: var(--accent-cyan);"></i> Yangi Excel Hisobotini Yuklash
+                                </h2>
+                                <p class="section-desc" style="margin: 0; font-size: 13px; color: var(--text-secondary);">
+                                    Railway Admin tizimidan yuklab olingan kunlik hisobot faylini (data.xlsx) yuklang
+                                </p>
+                            </div>
                         </div>
-                    </div>
+                        <div class="dropzone glow-border" id="dropzone" style="border: 2px dashed rgba(56, 189, 248, 0.4); border-radius: 16px; padding: 36px 20px; text-align: center; cursor: pointer; background: rgba(15, 23, 42, 0.4); transition: all 0.3s ease;">
+                            <input type="file" id="fileInput" accept=".xlsx, .xls" hidden>
+                            <div class="dropzone-content">
+                                <div class="upload-icon-pulse" style="font-size: 44px; color: var(--accent-cyan); margin-bottom: 14px;">
+                                    <i class="fa-solid fa-file-excel"></i>
+                                </div>
+                                <h3 style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin-bottom: 8px;">
+                                    Excel Faylini Shu Maydonga Tashlang yoki Tanlang
+                                </h3>
+                                <p style="font-size: 13.5px; color: var(--text-secondary); margin-bottom: 18px; max-width: 560px; margin-left: auto; margin-right: auto; line-height: 1.5;">
+                                    Yuklangan fayldagi 14 ta ustun avtomatik tahlil qilinadi, dublikatlar filtrlanadi va kassa hisobotlari yangilanadi.
+                                </p>
+                                <button type="button" class="btn btn-accent" style="padding: 10px 24px; font-size: 14px; font-weight: 700; border-radius: 10px;" onclick="event.stopPropagation(); document.getElementById('fileInput').click()">
+                                    <i class="fa-solid fa-folder-open"></i> Faylni Tanlash (.xlsx)
+                                </button>
+                            </div>
+                            <div class="upload-spinner" id="uploadSpinner" style="display: none; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px;">
+                                <div class="spinner-ring" style="width: 44px; height: 44px; border: 4px solid rgba(56, 189, 248, 0.2); border-top-color: var(--accent-cyan); border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                                <p id="spinnerText" style="font-size: 14px; color: var(--accent-cyan); font-weight: 600; margin: 0;">Fayl yuklanmoqda va chiptalar bazaga saqlanmoqda...</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="table-section glass-card">
+                        <div class="card-header flex-between" style="display: flex; align-items: center; justify-content: space-between;">
+                            <div>
+                                <h2><i class="fa-solid fa-clock-rotate-left" style="color: var(--accent-amber);"></i> Excel Fayllar Yuklash Audit Tarixi</h2>
+                                <p class="section-desc">Tizimga kiritilgan oxirgi fayllar va yangilanish jurnali</p>
+                            </div>
+                            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                                <button type="button" class="btn btn-outline btn-sm" id="backupDbBtn" title="SQLite ma'lumotlar bazasi zaxirasini (.db) yuklab olish" style="display: inline-flex; align-items: center; gap: 6px; border-radius: 8px; font-weight: 600; padding: 6px 12px; border-color: rgba(56, 189, 248, 0.4); color: var(--accent-cyan);">
+                                    <i class="fa-solid fa-download"></i> Baza Zaxirasi (.db)
+                                </button>
+                                <input type="file" id="restoreDbFileInput" accept=".db" hidden>
+                                <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('restoreDbFileInput').click()" title="Baza zaxirasidan (.db) qayta tiklash" style="display: inline-flex; align-items: center; gap: 6px; border-radius: 8px; font-weight: 600; padding: 6px 12px; border-color: rgba(16, 185, 129, 0.4); color: var(--accent-emerald);">
+                                    <i class="fa-solid fa-upload"></i> Bazani Tiklash
+                                </button>
+                                <button type="button" class="btn btn-accent btn-sm" onclick="document.getElementById('fileInput').click()" style="display: inline-flex; align-items: center; gap: 8px; border-radius: 8px; font-weight: 700; padding: 6px 14px;">
+                                    <i class="fa-solid fa-cloud-arrow-up"></i> Yangi Fayl Yuklash
+                                </button>
+                            </div>
+                        </div>
                     <div class="table-responsive">
                         <table class="data-table">
                             <thead>
                                 <tr>
                                     <th>№</th>
                                     <th>Fayl Nomi</th>
-                                    <th>Qatorlar Soni</th>
+                                    <th>Jami Qatorlar</th>
+                                    <th>Kiosk Qatorlari</th>
+                                    <th>Yangi Chiptalar</th>
+                                    <th>Dublikatlar</th>
+                                    <th>Kiritilgan Summa</th>
                                     <th>Sana va Vaqt</th>
                                     <th>Holat</th>
                                 </tr>
                             </thead>
                             <tbody id="uploadLogsTableBody">
                                 <tr>
-                                    <td colspan="5" class="empty-row">Audit tarixi yuklanmoqda...</td>
+                                    <td colspan="9" class="empty-row">Audit tarixi yuklanmoqda...</td>
                                 </tr>
                             </tbody>
                         </table>
