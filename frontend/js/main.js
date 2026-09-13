@@ -537,6 +537,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (adminTabBtn) {
             adminTabBtn.style.display = (user.role === 'admin') ? 'inline-flex' : 'none';
         }
+        const headerUploadBtn = document.getElementById('headerUploadBtn');
+        if (headerUploadBtn) {
+            headerUploadBtn.style.display = (user.role === 'admin') ? 'inline-flex' : 'none';
+        }
 
         try {
             fetchStats();
@@ -1218,7 +1222,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 handleFileUpload(e.dataTransfer.files[0]);
             }
         });
+
+        dropzone.addEventListener('click', (e) => {
+            if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) {
+                const fi = document.getElementById('fileInput');
+                if (fi) fi.click();
+            }
+        });
     }
+
+    window.triggerExcelUpload = function() {
+        const adminTabBtn = document.querySelector('.tab-btn[data-tab="tab-admin"]');
+        if (adminTabBtn) adminTabBtn.click();
+        const logsSubnavBtn = document.querySelector('.admin-subnav-btn[data-subtab="admin-logs"]');
+        if (logsSubnavBtn) logsSubnavBtn.click();
+        setTimeout(() => {
+            const fi = document.getElementById('fileInput');
+            if (fi) fi.click();
+        }, 100);
+    };
 
     if (fileInput) {
         fileInput.addEventListener('change', (e) => {
