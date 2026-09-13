@@ -364,7 +364,7 @@ def test_excel_import_extracts_all_fields_and_is_idempotent(tmp_path):
     # Row 1 split
     assert rows[0]["ticket_number"] == "TK1001"
     assert rows[0]["organization"] == "Afrosiyob"
-    assert rows[0]["payment_method"] == "Payme"
+    assert rows[0]["payment_method"] == "Payme (Online)"
     assert rows[0]["train_numbers"] == "001Ф"
     assert rows[0]["departure_station"] == "САМАРКАНД"
     assert rows[0]["arrival_station"] == "ТОШКЕНТ-ЙУЛОВЧИ"

@@ -290,7 +290,9 @@ DEFAULT_EMAIL_MAP = {
     "qarshikiosk@railway.uz": {"station": "Қарши", "col_soni": 20, "col_summa": 21}
 }
 
-ONLINE_PAYMENTS = ['HamkorbankHold', 'HamkorbankWebView', 'Payme', 'StripeIntegration', 'OctoBankFC']
+ONLINE_PAYMENTS = ['HamkorbankHold', 'HamkorbankWebView', 'Payme', 'StripeIntegration', 'OctoBankFC', 'Click', 'Uzum']
+TERMINAL_PAYMENTS = ['Uzcard', 'Uzkassa']
+KASSA_PAYMENTS = ['Kassa', 'Sorbon', 'Sorbon Kassa']
 
 def load_mappings():
     if os.path.exists(MAPPINGS_FILE):
@@ -572,8 +574,9 @@ def process_excel(data_path, report_path, uploaded_path=None):
                 df['YearMonth'] = df['Дата создания_dt'].dt.strftime('%Y-%m')
                 
                 kiosk_df = df[df['Пользователь'].isin(email_map.keys())].copy()
+                from database import resolve_payment_info
                 kiosk_df['PaymentType'] = kiosk_df['Способ оплаты'].apply(
-                    lambda x: 'Online' if x in ONLINE_PAYMENTS else 'Terminal'
+                    lambda x: resolve_payment_info(x)['type']
                 )
                 
                 unique_periods = sorted([p for p in kiosk_df['YearMonth'].dropna().unique()], reverse=True)
@@ -1398,7 +1401,13 @@ def download():
     # Daily Trend Sheet
     ws_daily = wb.create_sheet(title="Kunlik Trend")
     ws_daily.views.sheetView[0].showGridLines = True
-    d_headers = ['Sana', 'Jami Chiptalar (ta)', 'Jami Summa (so\'m)', 'Online Chiptalar', 'Online Summa', 'Terminal Chiptalar', 'Terminal Summa']
+    d_headers = [
+        'Sana', 'Jami Chiptalar (ta)', 'Jami Summa (so\'m)',
+        'Uzcard Terminal (ta)', 'Uzcard Summa',
+        'Humo Terminal (ta)', 'Humo Summa',
+        'Jami Terminal (ta)', 'Jami Terminal Summa',
+        'Online Chiptalar (ta)', 'Online Summa'
+    ]
     ws_daily.append(d_headers)
     for col_num, h in enumerate(d_headers, 1):
         cell = ws_daily.cell(row=1, column=col_num)
@@ -1421,12 +1430,16 @@ def download():
             dt.get('date', ''),
             dt.get('tickets', 0),
             dt.get('summa', 0),
+            dt.get('uzcard_tickets', 0),
+            dt.get('uzcard_summa', 0),
+            dt.get('humo_tickets', 0),
+            dt.get('humo_summa', 0),
+            dt.get('terminal_tickets', 0),
+            dt.get('terminal_summa', 0),
             dt.get('online_tickets', 0),
             dt.get('online_summa', 0),
-            dt.get('terminal_tickets', 0),
-            dt.get('terminal_summa', 0)
         ])
-        for c_i in range(1, 8):
+        for c_i in range(1, 12):
             cell = ws_daily.cell(row=r_i, column=c_i)
             cell.font = data_font
             cell.border = thin_border
@@ -1437,12 +1450,16 @@ def download():
         tot_d_r = len(daily_trend) + 2
         d_tix = sum(d.get('tickets', 0) for d in daily_trend)
         d_sum = sum(d.get('summa', 0) for d in daily_trend)
-        d_on_tix = sum(d.get('online_tickets', 0) for d in daily_trend)
-        d_on_sum = sum(d.get('online_summa', 0) for d in daily_trend)
+        d_uz_tix = sum(d.get('uzcard_tickets', 0) for d in daily_trend)
+        d_uz_sum = sum(d.get('uzcard_summa', 0) for d in daily_trend)
+        d_hu_tix = sum(d.get('humo_tickets', 0) for d in daily_trend)
+        d_hu_sum = sum(d.get('humo_summa', 0) for d in daily_trend)
         d_term_tix = sum(d.get('terminal_tickets', 0) for d in daily_trend)
         d_term_sum = sum(d.get('terminal_summa', 0) for d in daily_trend)
-        ws_daily.append(['JAMI', d_tix, d_sum, d_on_tix, d_on_sum, d_term_tix, d_term_sum])
-        for c_i in range(1, 8):
+        d_on_tix = sum(d.get('online_tickets', 0) for d in daily_trend)
+        d_on_sum = sum(d.get('online_summa', 0) for d in daily_trend)
+        ws_daily.append(['JAMI', d_tix, d_sum, d_uz_tix, d_uz_sum, d_hu_tix, d_hu_sum, d_term_tix, d_term_sum, d_on_tix, d_on_sum])
+        for c_i in range(1, 12):
             cell = ws_daily.cell(row=tot_d_r, column=c_i)
             cell.font = bold_font
             cell.border = thin_border
@@ -2045,10 +2062,11 @@ def restore_db():
 def warmup_stats_cache():
     try:
         db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
-        from database import init_db, save_monthly_report_to_db, get_all_stats_from_db
+        from database import init_db, save_monthly_report_to_db, get_all_stats_from_db, migrate_payment_methods
         init_db(db_path)
         
         email_map = load_mappings()
+        migrate_payment_methods(db_path, email_map)
         db_stats = get_all_stats_from_db(db_path, email_map)
         if not db_stats:
             report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')

@@ -12,6 +12,77 @@ def get_db_connection(db_path):
     conn.row_factory = sqlite3.Row
     return conn
 
+def resolve_payment_info(raw_val):
+    """
+    To'lov agentlarini aniq klassifikatsiya qilish:
+    1. Uzcard -> Terminal (Uzcard Terminal)
+    2. Uzkassa -> Terminal (Humo Terminal)
+    3. HamkorbankHold, StripeIntegration, OctoBankFC, Payme, HamkorbankWebView, Click, Uzum -> Online (Karta va SMS kod)
+    4. Kassa, Sorbon -> Sorbon Kassa
+    """
+    raw_str = str(raw_val or '').strip()
+    norm = raw_str.lower().replace(' ', '').replace('_', '').replace('-', '')
+
+    # 1. Uzcard Terminal
+    if 'uzcard' in norm:
+        return {
+            'type': 'Terminal',
+            'method': 'Uzcard Terminal',
+            'agent': 'Uzcard',
+            'channel': 'Terminal',
+            'raw': raw_str
+        }
+
+    # 2. Humo Terminal (Uzkassa)
+    if 'uzkassa' in norm or 'humo' in norm:
+        return {
+            'type': 'Terminal',
+            'method': 'Humo Terminal',
+            'agent': 'Humo (Uzkassa)',
+            'channel': 'Terminal',
+            'raw': raw_str
+        }
+
+    # 3. Kassa / Sorbon
+    if 'sorbon' in norm or norm == 'kassa' or 'касса' in norm:
+        return {
+            'type': 'Sorbon Kassa',
+            'method': 'Sorbon Kassa',
+            'agent': 'Sorbon Kassa',
+            'channel': 'Kassa',
+            'raw': raw_str
+        }
+
+    # 4. Specific Online agents (karta raqami va SMS kod bilan onlayn xarid)
+    if 'hamkorbankhold' in norm:
+        return {'type': 'Online', 'method': 'Hamkorbank (Online)', 'agent': 'Hamkorbank', 'channel': 'Online', 'raw': raw_str}
+    if 'hamkorbankwebview' in norm:
+        return {'type': 'Online', 'method': 'Hamkorbank WebView (Online)', 'agent': 'Hamkorbank WebView', 'channel': 'Online', 'raw': raw_str}
+    if 'hamkorbank' in norm:
+        return {'type': 'Online', 'method': 'Hamkorbank (Online)', 'agent': 'Hamkorbank', 'channel': 'Online', 'raw': raw_str}
+    if 'payme' in norm:
+        return {'type': 'Online', 'method': 'Payme (Online)', 'agent': 'Payme', 'channel': 'Online', 'raw': raw_str}
+    if 'stripe' in norm:
+        return {'type': 'Online', 'method': 'Stripe (Online)', 'agent': 'Stripe', 'channel': 'Online', 'raw': raw_str}
+    if 'octobank' in norm:
+        return {'type': 'Online', 'method': 'OctoBank (Online)', 'agent': 'OctoBank', 'channel': 'Online', 'raw': raw_str}
+    if 'click' in norm:
+        return {'type': 'Online', 'method': 'Click (Online)', 'agent': 'Click', 'channel': 'Online', 'raw': raw_str}
+    if 'uzum' in norm:
+        return {'type': 'Online', 'method': 'Uzum (Online)', 'agent': 'Uzum', 'channel': 'Online', 'raw': raw_str}
+
+    if any(k in norm for k in ['online', 'онлайн', 'web', 'hold', 'card', 'карта']):
+        return {'type': 'Online', 'method': raw_str or 'Online', 'agent': raw_str or 'Online', 'channel': 'Online', 'raw': raw_str}
+
+    # Default fallback to Terminal
+    return {
+        'type': 'Terminal',
+        'method': raw_str or 'Terminal',
+        'agent': raw_str or 'Terminal',
+        'channel': 'Terminal',
+        'raw': raw_str
+    }
+
 def init_db(db_path):
     conn = get_db_connection(db_path)
     cursor = conn.cursor()
@@ -52,9 +123,33 @@ def init_db(db_path):
             online_summa REAL DEFAULT 0,
             terminal_tickets INTEGER DEFAULT 0,
             terminal_summa REAL DEFAULT 0,
+            uzcard_tickets INTEGER DEFAULT 0,
+            uzcard_summa REAL DEFAULT 0,
+            humo_tickets INTEGER DEFAULT 0,
+            humo_summa REAL DEFAULT 0,
+            kassa_tickets INTEGER DEFAULT 0,
+            kassa_summa REAL DEFAULT 0,
             UNIQUE(ym, date_str)
         )
     ''')
+
+    # Safe dynamic column migration for daily_stats table
+    cursor.execute("PRAGMA table_info(daily_stats)")
+    existing_daily_cols = {row[1] for row in cursor.fetchall()}
+    daily_cols_to_add = [
+        ('uzcard_tickets', 'INTEGER DEFAULT 0'),
+        ('uzcard_summa', 'REAL DEFAULT 0'),
+        ('humo_tickets', 'INTEGER DEFAULT 0'),
+        ('humo_summa', 'REAL DEFAULT 0'),
+        ('kassa_tickets', 'INTEGER DEFAULT 0'),
+        ('kassa_summa', 'REAL DEFAULT 0'),
+    ]
+    for col_name, col_type in daily_cols_to_add:
+        if col_name not in existing_daily_cols:
+            try:
+                cursor.execute(f"ALTER TABLE daily_stats ADD COLUMN {col_name} {col_type}")
+            except Exception:
+                pass
 
     # 4. Station Daily Breakdown Table
     cursor.execute('''
@@ -287,7 +382,13 @@ def rebuild_aggregates_from_tickets(db_path, email_map):
                        SUM(CASE WHEN payment_type = 'Online' THEN qty ELSE 0 END) as online_tickets,
                        SUM(CASE WHEN payment_type = 'Online' THEN summa ELSE 0 END) as online_summa,
                        SUM(CASE WHEN payment_type = 'Terminal' THEN qty ELSE 0 END) as terminal_tickets,
-                       SUM(CASE WHEN payment_type = 'Terminal' THEN summa ELSE 0 END) as terminal_summa
+                       SUM(CASE WHEN payment_type = 'Terminal' THEN summa ELSE 0 END) as terminal_summa,
+                       SUM(CASE WHEN payment_method LIKE '%Uzcard%' THEN qty ELSE 0 END) as uzcard_tickets,
+                       SUM(CASE WHEN payment_method LIKE '%Uzcard%' THEN summa ELSE 0 END) as uzcard_summa,
+                       SUM(CASE WHEN (payment_method LIKE '%Humo%' OR payment_method LIKE '%Uzkassa%') THEN qty ELSE 0 END) as humo_tickets,
+                       SUM(CASE WHEN (payment_method LIKE '%Humo%' OR payment_method LIKE '%Uzkassa%') THEN summa ELSE 0 END) as humo_summa,
+                       SUM(CASE WHEN (payment_type LIKE '%Kassa%' OR payment_method LIKE '%Kassa%') THEN qty ELSE 0 END) as kassa_tickets,
+                       SUM(CASE WHEN (payment_type LIKE '%Kassa%' OR payment_method LIKE '%Kassa%') THEN summa ELSE 0 END) as kassa_summa
                 FROM tickets
                 WHERE ym = ? AND LOWER(TRIM(user_email)) IN ({placeholders})
                 GROUP BY date_str
@@ -299,16 +400,35 @@ def rebuild_aggregates_from_tickets(db_path, email_map):
                 d_str = d[0]
                 if d_str:
                     cursor.execute('''
-                        INSERT INTO daily_stats (ym, date_str, total_tickets, total_summa, online_tickets, online_summa, terminal_tickets, terminal_summa)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO daily_stats (
+                            ym, date_str, total_tickets, total_summa,
+                            online_tickets, online_summa, terminal_tickets, terminal_summa,
+                            uzcard_tickets, uzcard_summa, humo_tickets, humo_summa,
+                            kassa_tickets, kassa_summa
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(ym, date_str) DO UPDATE SET
                             total_tickets = excluded.total_tickets,
                             total_summa = excluded.total_summa,
                             online_tickets = excluded.online_tickets,
                             online_summa = excluded.online_summa,
                             terminal_tickets = excluded.terminal_tickets,
-                            terminal_summa = excluded.terminal_summa
-                    ''', (ym, d_str, int(d[1] or 0), float(d[2] or 0.0), int(d[3] or 0), float(d[4] or 0.0), int(d[5] or 0), float(d[6] or 0.0)))
+                            terminal_summa = excluded.terminal_summa,
+                            uzcard_tickets = excluded.uzcard_tickets,
+                            uzcard_summa = excluded.uzcard_summa,
+                            humo_tickets = excluded.humo_tickets,
+                            humo_summa = excluded.humo_summa,
+                            kassa_tickets = excluded.kassa_tickets,
+                            kassa_summa = excluded.kassa_summa
+                    ''', (
+                        ym, d_str,
+                        int(d[1] or 0), float(d[2] or 0.0),
+                        int(d[3] or 0), float(d[4] or 0.0),
+                        int(d[5] or 0), float(d[6] or 0.0),
+                        int(d[7] or 0), float(d[8] or 0.0),
+                        int(d[9] or 0), float(d[10] or 0.0),
+                        int(d[11] or 0), float(d[12] or 0.0)
+                    ))
 
         conn.commit()
     except Exception as ex:
@@ -442,8 +562,10 @@ def batch_upsert_tickets(db_path, ticket_list, batch_size=1000):
             
             user_email = str(t.get('user_email') or '')
             station_name = str(t.get('station_name') or '')
-            payment_type = str(t.get('payment_type') or 'Terminal')
-            payment_method = str(t.get('payment_method') or payment_type or 'Terminal')
+            raw_p = t.get('payment_method') or t.get('payment_type') or 'Terminal'
+            p_info = resolve_payment_info(raw_p)
+            payment_type = p_info['type']
+            payment_method = p_info['method']
             organization = str(t.get('organization') or 'Default')
             train_numbers = str(t.get('train_numbers') or '')
             departure_station = str(t.get('departure_station') or '')
@@ -636,7 +758,9 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
                 s_val = 0.0
 
             raw_pay_val = str(row.get(pay_col) if pay_col and pd.notnull(row.get(pay_col)) else 'Terminal').strip() or 'Terminal'
-            p_type = 'Online' if any(k in raw_pay_val.lower() for k in ['online', 'онлайн', 'click', 'payme', 'uzum']) else 'Terminal'
+            p_info = resolve_payment_info(raw_pay_val)
+            p_type = p_info['type']
+            p_method = p_info['method']
             order_code = str(row.get(ticket_col) if ticket_col and pd.notnull(row.get(ticket_col)) else '').strip()
 
             org_val = str(row.get(org_col) if org_col and pd.notnull(row.get(org_col)) else 'Default').strip() or 'Default'
@@ -665,7 +789,7 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
                             'user_email': u_val,
                             'station_name': st_name,
                             'payment_type': p_type,
-                            'payment_method': raw_pay_val,
+                            'payment_method': p_method,
                             'organization': org_val,
                             'train_numbers': train_val,
                             'departure_station': from_st_val,
@@ -689,7 +813,7 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
                         'user_email': u_val,
                         'station_name': st_name,
                         'payment_type': p_type,
-                        'payment_method': raw_pay_val,
+                        'payment_method': p_method,
                         'organization': org_val,
                         'train_numbers': train_val,
                         'departure_station': from_st_val,
@@ -792,16 +916,32 @@ def save_monthly_report_to_db(db_path, ym, stats):
                 term_s = d.get('terminal_summa', 0)
 
                 cursor.execute('''
-                    INSERT INTO daily_stats (ym, date_str, total_tickets, total_summa, online_tickets, online_summa, terminal_tickets, terminal_summa)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO daily_stats (
+                        ym, date_str, total_tickets, total_summa,
+                        online_tickets, online_summa, terminal_tickets, terminal_summa,
+                        uzcard_tickets, uzcard_summa, humo_tickets, humo_summa,
+                        kassa_tickets, kassa_summa
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(ym, date_str) DO UPDATE SET
                         total_tickets = excluded.total_tickets,
                         total_summa = excluded.total_summa,
                         online_tickets = excluded.online_tickets,
                         online_summa = excluded.online_summa,
                         terminal_tickets = excluded.terminal_tickets,
-                        terminal_summa = excluded.terminal_summa
-                ''', (ym, d_str, d_tix, d_sum, on_t, on_s, term_t, term_s))
+                        terminal_summa = excluded.terminal_summa,
+                        uzcard_tickets = excluded.uzcard_tickets,
+                        uzcard_summa = excluded.uzcard_summa,
+                        humo_tickets = excluded.humo_tickets,
+                        humo_summa = excluded.humo_summa,
+                        kassa_tickets = excluded.kassa_tickets,
+                        kassa_summa = excluded.kassa_summa
+                ''', (
+                    ym, d_str, d_tix, d_sum, on_t, on_s, term_t, term_s,
+                    d.get('uzcard_tickets', 0), d.get('uzcard_summa', 0.0),
+                    d.get('humo_tickets', 0), d.get('humo_summa', 0.0),
+                    d.get('kassa_tickets', 0), d.get('kassa_summa', 0.0)
+                ))
 
         conn.commit()
     except Exception as ex:
@@ -873,7 +1013,16 @@ def get_all_stats_from_db(db_path, email_map):
 
             cursor.execute('''
                 SELECT date_str as date, total_tickets as tickets, total_summa as summa,
-                       online_tickets, online_summa, terminal_tickets, terminal_summa
+                       COALESCE(online_tickets, 0) as online_tickets,
+                       COALESCE(online_summa, 0) as online_summa,
+                       COALESCE(terminal_tickets, 0) as terminal_tickets,
+                       COALESCE(terminal_summa, 0) as terminal_summa,
+                       COALESCE(uzcard_tickets, 0) as uzcard_tickets,
+                       COALESCE(uzcard_summa, 0) as uzcard_summa,
+                       COALESCE(humo_tickets, 0) as humo_tickets,
+                       COALESCE(humo_summa, 0) as humo_summa,
+                       COALESCE(kassa_tickets, 0) as kassa_tickets,
+                       COALESCE(kassa_summa, 0) as kassa_summa
                 FROM daily_stats
                 WHERE ym = ?
                 ORDER BY date_str ASC
@@ -1055,3 +1204,47 @@ def sync_json_tickets_to_db(db_path, ticket_list, email_map=None):
         'total': res['total_read'],
         'rejected_invalid': res.get('rejected_invalid', 0)
     }
+
+def migrate_payment_methods(db_path, email_map=None):
+    """
+    Updates all existing tickets in SQLite database to match the exact payment classifications:
+    - Uzcard -> Terminal / Uzcard Terminal
+    - Uzkassa -> Terminal / Humo Terminal
+    - HamkorbankHold, StripeIntegration, OctoBankFC, Payme, HamkorbankWebView -> Online / <Agent> (Online)
+    - Kassa / Sorbon -> Sorbon Kassa
+    And triggers rebuild_aggregates_from_tickets to recalculate daily and monthly stats.
+    """
+    init_db(db_path)
+    if not os.path.exists(db_path):
+        return {'status': 'error', 'message': 'Database not found'}
+
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    migrated_count = 0
+    try:
+        cursor.execute("SELECT ticket_number, payment_type, payment_method FROM tickets")
+        rows = cursor.fetchall()
+        updates = []
+        for r in rows:
+            t_num = r['ticket_number']
+            cur_type = r['payment_type']
+            cur_meth = r['payment_method']
+            p_info = resolve_payment_info(cur_meth or cur_type)
+            if p_info['type'] != cur_type or p_info['method'] != cur_meth:
+                updates.append((p_info['type'], p_info['method'], t_num))
+
+        if updates:
+            cursor.executemany("UPDATE tickets SET payment_type = ?, payment_method = ? WHERE ticket_number = ?", updates)
+            conn.commit()
+            migrated_count = len(updates)
+            print(f"[DB] migrate_payment_methods: {migrated_count} tickets successfully migrated!")
+    except Exception as e:
+        print("[DB] migrate_payment_methods error:", e)
+        conn.rollback()
+    finally:
+        conn.close()
+
+    # Rebuild aggregates so daily_stats & monthly_summaries reflect the updated classifications
+    rebuild_aggregates_from_tickets(db_path, email_map)
+    return {'status': 'success', 'migrated_count': migrated_count}
+

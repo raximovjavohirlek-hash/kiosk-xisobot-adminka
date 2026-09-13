@@ -1687,17 +1687,27 @@ document.addEventListener('DOMContentLoaded', () => {
         // Card 4: To'lov Turlari Nisbati (Online / Terminal)
         let onlineSum = 0;
         let terminalSum = 0;
+        let uzcardSum = 0;
+        let humoSum = 0;
         (currentStats && currentStats.daily_trend ? currentStats.daily_trend : (stats.daily_trend || [])).forEach(item => {
             onlineSum += item.online_tickets || 0;
             terminalSum += item.terminal_tickets || 0;
+            uzcardSum += item.uzcard_tickets || 0;
+            humoSum += item.humo_tickets || 0;
         });
         const grandPayTickets = onlineSum + terminalSum || 1;
         const onlinePct = ((onlineSum / grandPayTickets) * 100).toFixed(1);
         const terminalPct = ((terminalSum / grandPayTickets) * 100).toFixed(1);
 
         if (dirKpiPaymentRatio) dirKpiPaymentRatio.textContent = `${onlinePct}% / ${terminalPct}%`;
-        if (dirKpiPaymentOnline) dirKpiPaymentOnline.innerHTML = `<i class="fa-solid fa-globe"></i> Online: ${onlineSum.toLocaleString()} ta`;
-        if (dirKpiPaymentTerminal) dirKpiPaymentTerminal.textContent = `Terminal: ${terminalSum.toLocaleString()} ta`;
+        if (dirKpiPaymentOnline) dirKpiPaymentOnline.innerHTML = `<i class="fa-solid fa-globe"></i> Online: ${onlineSum.toLocaleString()} ta (${onlinePct}%)`;
+        if (dirKpiPaymentTerminal) {
+            let termLabel = `Terminal: ${terminalSum.toLocaleString()} ta`;
+            if (uzcardSum > 0 || humoSum > 0) {
+                termLabel += ` (Uzcard: ${uzcardSum.toLocaleString()}, Humo: ${humoSum.toLocaleString()})`;
+            }
+            dirKpiPaymentTerminal.textContent = termLabel;
+        }
 
         if (directorAiText) {
             directorAiText.innerHTML = summary.ai_recommendation || "Ma'lumotlar tahlil qilinmoqda...";
@@ -2038,19 +2048,45 @@ document.addEventListener('DOMContentLoaded', () => {
 
         dailyTrend.forEach(item => {
             const tr = document.createElement('tr');
-            const payTotal = (item.online_tickets || 0) + (item.terminal_tickets || 0) || 1;
-            const onlinePct = ((item.online_tickets || 0) / payTotal * 100).toFixed(1);
-            const terminalPct = (100 - onlinePct).toFixed(1);
+            const onTix = item.online_tickets || 0;
+            const onSum = item.online_summa || 0;
+            const termTix = item.terminal_tickets || 0;
+            const termSum = item.terminal_summa || 0;
+            const uzTix = item.uzcard_tickets || 0;
+            const huTix = item.humo_tickets || 0;
+            const kassaTix = item.kassa_tickets || 0;
+            const payTotal = onTix + termTix + kassaTix || item.tickets || 1;
+
+            const onlinePct = (onTix / payTotal * 100).toFixed(1);
+            const terminalPct = (termTix / payTotal * 100).toFixed(1);
+
+            let tooltipDetail = `Online: ${onTix.toLocaleString()} ta (${(onSum / 1000000).toFixed(1)}M so'm) | Terminal: ${termTix.toLocaleString()} ta (${(termSum / 1000000).toFixed(1)}M so'm)`;
+            if (uzTix > 0 || huTix > 0) {
+                tooltipDetail += ` [Uzcard Terminal: ${uzTix.toLocaleString()} ta | Humo Terminal: ${huTix.toLocaleString()} ta]`;
+            }
+
             tr.innerHTML = `
                 <td><strong>${item.date}</strong></td>
                 <td><strong>${item.tickets.toLocaleString('uz-UZ')} ta</strong></td>
                 <td><strong style="color: var(--accent-emerald);">${item.summa.toLocaleString('uz-UZ')} so'm</strong></td>
                 <td>
-                    <div class="payment-type-cell" title="Online: ${item.online_tickets.toLocaleString()} ta (${(item.online_summa / 1000000).toFixed(1)}M so'm) | Terminal: ${item.terminal_tickets.toLocaleString()} ta (${(item.terminal_summa / 1000000).toFixed(1)}M so'm)">
+                    <div class="payment-type-cell" title="${tooltipDetail}">
                         <div class="payment-type-track">
                             <div class="payment-type-fill online" style="width: ${onlinePct}%;"></div>
                         </div>
-                        <span class="payment-type-label"><i class="fa-solid fa-globe" style="color: var(--accent-cyan);"></i> ${onlinePct}% / <i class="fa-solid fa-credit-card" style="color: var(--accent-violet);"></i> ${terminalPct}%</span>
+                        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11px; margin-top: 4px;">
+                            <span style="color: var(--accent-cyan); font-weight: 600;" title="Online: karta raqami va SMS tasdiqlash kodi orqali (Hamkorbank, Payme, Stripe...)">
+                                <i class="fa-solid fa-globe"></i> Online: ${onTix.toLocaleString()} ta (${onlinePct}%)
+                            </span>
+                            <span style="color: var(--accent-violet); font-weight: 600;" title="Terminal: Uzcard (${uzTix} ta) + Humo (${huTix} ta)">
+                                <i class="fa-solid fa-credit-card"></i> Terminal: ${termTix.toLocaleString()} ta (${terminalPct}%)
+                            </span>
+                        </div>
+                        ${(uzTix > 0 || huTix > 0) ? `
+                        <div style="display: flex; gap: 6px; font-size: 10px; color: var(--text-muted); margin-top: 3px;">
+                            <span style="background: rgba(99, 102, 241, 0.15); color: #818cf8; padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(99, 102, 241, 0.25);" title="Uzcard terminaldan xarid qilingan">Uzcard: ${uzTix.toLocaleString()}</span>
+                            <span style="background: rgba(168, 85, 247, 0.15); color: #c084fc; padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(168, 85, 247, 0.25);" title="Humo terminaldan xarid qilingan (Uzkassa)">Humo: ${huTix.toLocaleString()}</span>
+                        </div>` : ''}
                     </div>
                 </td>
                 <td><span class="status-badge"><i class="fa-solid fa-check"></i> Aniq</span></td>
