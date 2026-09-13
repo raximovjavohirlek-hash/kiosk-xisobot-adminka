@@ -79,12 +79,36 @@ def init_db(db_path):
             user_email TEXT,
             station_name TEXT,
             payment_type TEXT DEFAULT 'Terminal',
+            payment_method TEXT DEFAULT 'Terminal',
+            organization TEXT DEFAULT 'Default',
+            train_numbers TEXT DEFAULT '',
+            departure_station TEXT DEFAULT '',
+            arrival_station TEXT DEFAULT '',
+            insurance REAL DEFAULT 0,
             qty INTEGER DEFAULT 1,
             summa REAL DEFAULT 0,
             status TEXT DEFAULT 'ACTIVE',
             uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+
+    # Safe dynamic column migration for existing tickets table
+    cursor.execute("PRAGMA table_info(tickets)")
+    existing_cols = {row[1] for row in cursor.fetchall()}
+    columns_to_add = [
+        ('payment_method', 'TEXT DEFAULT "Terminal"'),
+        ('organization', 'TEXT DEFAULT "Default"'),
+        ('train_numbers', 'TEXT DEFAULT ""'),
+        ('departure_station', 'TEXT DEFAULT ""'),
+        ('arrival_station', 'TEXT DEFAULT ""'),
+        ('insurance', 'REAL DEFAULT 0'),
+    ]
+    for col_name, col_type in columns_to_add:
+        if col_name not in existing_cols:
+            try:
+                cursor.execute(f"ALTER TABLE tickets ADD COLUMN {col_name} {col_type}")
+            except Exception:
+                pass
 
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_tickets_ym ON tickets(ym)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_tickets_date ON tickets(date_str)')
@@ -365,10 +389,10 @@ def delete_station_override(db_path, ym, email, day_str='ALL', email_map=None):
 def batch_upsert_tickets(db_path, ticket_list, batch_size=1000):
     """
     Inserts ticket dictionaries into SQLite using batch transactions and INSERT OR IGNORE.
-    Returns dict: {'total_read': int, 'inserted': int, 'skipped': int}
+    Returns dict: {'total_read': int, 'inserted': int, 'skipped': int, 'rejected_invalid': int, 'inserted_amount': float}
     """
     if not ticket_list:
-        return {'total_read': 0, 'inserted': 0, 'skipped': 0}
+        return {'total_read': 0, 'inserted': 0, 'skipped': 0, 'rejected_invalid': 0, 'inserted_amount': 0.0}
 
     init_db(db_path)
     conn = get_db_connection(db_path)
@@ -378,17 +402,22 @@ def batch_upsert_tickets(db_path, ticket_list, batch_size=1000):
     inserted_count = 0
     skipped_count = 0
     rejected_invalid = 0
+    inserted_amount = 0.0
 
     try:
         sql = '''
             INSERT OR IGNORE INTO tickets (
                 ticket_number, order_id, date_str, ym, user_email,
-                station_name, payment_type, qty, summa, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                station_name, payment_type, payment_method, organization,
+                train_numbers, departure_station, arrival_station, insurance,
+                qty, summa, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         '''
 
-        cursor.execute("SELECT COUNT(*) FROM tickets")
-        count_before = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*), COALESCE(SUM(summa), 0) FROM tickets")
+        r_before = cursor.fetchone()
+        count_before = int(r_before[0] or 0)
+        summa_before = float(r_before[1] or 0.0)
 
         params_batch = []
         for idx, t in enumerate(ticket_list):
@@ -414,13 +443,25 @@ def batch_upsert_tickets(db_path, ticket_list, batch_size=1000):
             user_email = str(t.get('user_email') or '')
             station_name = str(t.get('station_name') or '')
             payment_type = str(t.get('payment_type') or 'Terminal')
+            payment_method = str(t.get('payment_method') or payment_type or 'Terminal')
+            organization = str(t.get('organization') or 'Default')
+            train_numbers = str(t.get('train_numbers') or '')
+            departure_station = str(t.get('departure_station') or '')
+            arrival_station = str(t.get('arrival_station') or '')
+            try:
+                insurance = float(t.get('insurance') or 0.0)
+            except Exception:
+                insurance = 0.0
+
             qty = int(t.get('qty') or 1)
-            summa = float(t.get('summa') or 0)
+            summa = float(t.get('summa') or 0.0)
             status = str(t.get('status') or 'ACTIVE')
 
             params_batch.append((
                 t_num, order_id, date_str, ym, user_email,
-                station_name, payment_type, qty, summa, status
+                station_name, payment_type, payment_method, organization,
+                train_numbers, departure_station, arrival_station, insurance,
+                qty, summa, status
             ))
 
             if len(params_batch) >= batch_size:
@@ -432,10 +473,13 @@ def batch_upsert_tickets(db_path, ticket_list, batch_size=1000):
 
         conn.commit()
 
-        cursor.execute("SELECT COUNT(*) FROM tickets")
-        count_after = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*), COALESCE(SUM(summa), 0) FROM tickets")
+        r_after = cursor.fetchone()
+        count_after = int(r_after[0] or 0)
+        summa_after = float(r_after[1] or 0.0)
 
         inserted_count = count_after - count_before
+        inserted_amount = round(summa_after - summa_before, 2)
         skipped_count = total_read - rejected_invalid - inserted_count
 
     except Exception as ex:
@@ -449,7 +493,8 @@ def batch_upsert_tickets(db_path, ticket_list, batch_size=1000):
         'total_read': total_read,
         'inserted': inserted_count,
         'skipped': skipped_count,
-        'rejected_invalid': rejected_invalid
+        'rejected_invalid': rejected_invalid,
+        'inserted_amount': inserted_amount
     }
 
 def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
@@ -484,7 +529,7 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
             return {
                 'status': 'skipped_report_format',
                 'message': "Bu hisobot formatidagi fayl (Худудлар varag'i bor) — process_excel orqali qayta ishlanadi, tranzaksiya jadvaliga yozilmaydi.",
-                'metrics': {'total_read': 0, 'inserted': 0, 'skipped': 0}
+                'metrics': {'total_read': 0, 'inserted': 0, 'skipped': 0, 'inserted_amount': 0.0}
             }
 
         sheet_name = xl.sheet_names[0]
@@ -523,12 +568,18 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
             return None
 
         ticket_col = find_col(['код заказа', 'номер билета', 'chipta raqami', 'ticket number', 'ticket_number', 'id заказа', 'order_id'])
-        ticket_numbers_col = find_col(['номера билетов', 'ticket numbers'])
+        ticket_numbers_col = find_col(['номера билетов', 'ticket numbers', 'chipta raqamlari'])
         date_col = find_col(['дата создания', 'дата', 'date', 'sana', 'created_at', 'кун'])
         user_col = find_col(['пользователь', 'user', 'email', 'pochta', 'kassa'])
         qty_col = find_col(['количество билетов', 'количество', 'soni', 'tickets'])
         sum_col = find_col(['общая стоимость', 'стоимость', 'summa', 'amount', 'total', 'жами'])
-        pay_col = find_col(['способ оплаты', 'оплата', 'paymenttype', 'payment_type'])
+        pay_col = find_col(['способ оплаты', 'оплата', 'paymenttype', 'payment_type', 'to\'lov turi'])
+        org_col = find_col(['организация', 'organization', 'tashkilot', 'org'])
+        train_col = find_col(['номера поездов', 'номер поезда', 'train_numbers', 'poezd raqami', 'poezd'])
+        from_st_col = find_col(['станция отправления', 'departure_station', 'jonash vokzali', 'jonash stansiyasi', 'qayerdan'])
+        to_st_col = find_col(['станция прибытия', 'arrival_station', 'yetib borish vokzali', 'yetib borish', 'qayerga'])
+        ins_col = find_col(['страховка', 'insurance', 'sug\'urta', 'sugurta'])
+        status_col = find_col(['статус', 'status', 'holat'])
 
         # Only ingest rows from whitelisted kiosk emails (email_map keys) — everything
         # else (regular customer accounts, social logins, etc.) must be skipped entirely.
@@ -549,6 +600,8 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
 
         ticket_rows = []
         skipped_not_whitelisted = 0
+        total_excel_rows = len(df)
+
         for idx, row in df.iterrows():
             u_val = str(row.get(user_col) if user_col else '').strip()
 
@@ -582,9 +635,19 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
             except Exception:
                 s_val = 0.0
 
-            p_val = str(row.get(pay_col) if pay_col else 'Terminal')
-            p_type = 'Online' if any(k in p_val.lower() for k in ['online', 'онлайн', 'click', 'payme', 'uzum']) else 'Terminal'
+            raw_pay_val = str(row.get(pay_col) if pay_col and pd.notnull(row.get(pay_col)) else 'Terminal').strip() or 'Terminal'
+            p_type = 'Online' if any(k in raw_pay_val.lower() for k in ['online', 'онлайн', 'click', 'payme', 'uzum']) else 'Terminal'
             order_code = str(row.get(ticket_col) if ticket_col and pd.notnull(row.get(ticket_col)) else '').strip()
+
+            org_val = str(row.get(org_col) if org_col and pd.notnull(row.get(org_col)) else 'Default').strip() or 'Default'
+            train_val = str(row.get(train_col) if train_col and pd.notnull(row.get(train_col)) else '').strip()
+            from_st_val = str(row.get(from_st_col) if from_st_col and pd.notnull(row.get(from_st_col)) else '').strip()
+            to_st_val = str(row.get(to_st_col) if to_st_col and pd.notnull(row.get(to_st_col)) else '').strip()
+            try:
+                ins_val = float(re.sub(r'[^\d\-.]', '', str(row.get(ins_col)))) if ins_col and pd.notnull(row.get(ins_col)) else 0.0
+            except Exception:
+                ins_val = 0.0
+            row_status = str(row.get(status_col) if status_col and pd.notnull(row.get(status_col)) else 'ACTIVE').strip() or 'ACTIVE'
 
             tn_val = str(row.get(ticket_numbers_col) if ticket_numbers_col and pd.notnull(row.get(ticket_numbers_col)) else '').strip()
             ticket_nums_list = [t.strip() for t in re.split(r'[,;\s]+', tn_val) if t.strip()]
@@ -592,6 +655,7 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
             if ticket_nums_list:
                 num_tickets = len(ticket_nums_list)
                 per_ticket_summa = round(s_val / num_tickets, 2) if num_tickets > 0 else s_val
+                per_ticket_ins = round(ins_val / num_tickets, 2) if num_tickets > 0 else ins_val
                 for t_num in ticket_nums_list:
                     if d_str or s_val > 0 or q_val > 0:
                         ticket_rows.append({
@@ -601,14 +665,20 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
                             'user_email': u_val,
                             'station_name': st_name,
                             'payment_type': p_type,
+                            'payment_method': raw_pay_val,
+                            'organization': org_val,
+                            'train_numbers': train_val,
+                            'departure_station': from_st_val,
+                            'arrival_station': to_st_val,
+                            'insurance': per_ticket_ins,
                             'qty': 1,
                             'summa': per_ticket_summa,
-                            'status': 'ACTIVE'
+                            'status': row_status
                         })
             else:
                 t_num = order_code
                 if not t_num:
-                    raw_str = f"{d_str}_{u_val}_{tn_val}_{q_val}_{s_val}_{p_val}"
+                    raw_str = f"{d_str}_{u_val}_{tn_val}_{q_val}_{s_val}_{raw_pay_val}"
                     t_num = "TICK_" + hashlib.sha256(raw_str.encode()).hexdigest()[:16].upper()
 
                 if d_str or s_val > 0 or q_val > 0:
@@ -619,20 +689,38 @@ def smart_parse_and_save_excel(db_path, file_input, filename, email_map):
                         'user_email': u_val,
                         'station_name': st_name,
                         'payment_type': p_type,
+                        'payment_method': raw_pay_val,
+                        'organization': org_val,
+                        'train_numbers': train_val,
+                        'departure_station': from_st_val,
+                        'arrival_station': to_st_val,
+                        'insurance': ins_val,
                         'qty': q_val if q_val > 0 else 1,
                         'summa': s_val,
-                        'status': 'ACTIVE'
+                        'status': row_status
                     })
 
         metrics = batch_upsert_tickets(db_path, ticket_rows)
         metrics['skipped_not_whitelisted'] = skipped_not_whitelisted
+        metrics['total_excel_rows'] = total_excel_rows
+        metrics['relevant_kiosk_rows'] = total_excel_rows - skipped_not_whitelisted
 
         # Rebuild all aggregate summaries directly from the deduplicated tickets table
         rebuild_aggregates_from_tickets(db_path, email_map)
 
+        msg = (
+            f"Import muvaffaqiyatli yakunlandi. "
+            f"Jami Excel qatorlari: {total_excel_rows:,} | "
+            f"Mos kelgan kiosk qatorlari: {metrics['relevant_kiosk_rows']:,} | "
+            f"Yangi kiritilgan chiptalar: {metrics['inserted']:,} | "
+            f"Dublikat o'tkazib yuborilgan: {metrics['skipped']:,} | "
+            f"Noto'g'ri yozuvlar: {metrics['rejected_invalid']} | "
+            f"Jami kiritilgan summa: {metrics.get('inserted_amount', 0):,.0f} so'm"
+        )
+
         return {
             'status': 'success',
-            'message': f"Excel fayli muvaffaqiyatli ishlandi! ({metrics['inserted']} ta yangi chipta qo'shildi, {metrics['skipped']} ta takrorlangan dublikat o'tkazib yuborildi, {skipped_not_whitelisted} ta kiosk bo'lmagan foydalanuvchi elandi)",
+            'message': msg,
             'metrics': metrics
         }
 
@@ -895,7 +983,9 @@ def get_paginated_tickets_from_db(db_path, page=1, per_page=20, search='', stati
 
         cursor.execute(f'''
             SELECT ticket_number, order_id, date_str, ym, user_email, station_name,
-                   payment_type, qty, summa, status, uploaded_at
+                   payment_type, payment_method, organization, train_numbers,
+                   departure_station, arrival_station, insurance,
+                   qty, summa, status, uploaded_at
             FROM tickets
             {where_clause}
             ORDER BY date_str DESC, ticket_number DESC

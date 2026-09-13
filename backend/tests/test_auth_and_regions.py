@@ -243,3 +243,131 @@ def test_get_paginated_tickets_restrict_email(tmp_path):
     rows = result["tickets"] if isinstance(result, dict) and "tickets" in result else result[0]
     emails = {row["user_email"] for row in rows}
     assert emails == {"samarqandkiosk@railway.uz"}
+
+
+def test_login_rejects_inactive_user(client, users_file):
+    # Set samarqand_user is_active = False
+    users = json.loads(users_file.read_text(encoding="utf-8"))
+    for u in users:
+        if u["username"] == "samarqand_user":
+            u["is_active"] = False
+    users_file.write_text(json.dumps(users), encoding="utf-8")
+
+    resp = client.post("/api/auth/login", json={"username": "samarqand_user", "password": "SamPass1!"})
+    assert resp.status_code == 403
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "faolsizlantirilgan" in data["error"].lower()
+
+
+def test_admin_can_update_user_status_and_reset_password(client):
+    admin_token = app_module.issue_token("Javohir", "admin")
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # Deactivate user
+    resp = client.put("/api/users/samarqand_user", json={"is_active": False}, headers=headers)
+    assert resp.status_code == 200
+    assert resp.get_json()["user"]["is_active"] is False
+
+    # Try login as deactivated user -> 403
+    login_resp = client.post("/api/auth/login", json={"username": "samarqand_user", "password": "SamPass1!"})
+    assert login_resp.status_code == 403
+
+    # Reactivate user and reset password
+    resp = client.put(
+        "/api/users/samarqand_user",
+        json={"is_active": True, "password": "BrandNewPass2026!"},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["user"]["is_active"] is True
+
+    # Login with new password -> 200
+    login_resp2 = client.post("/api/auth/login", json={"username": "samarqand_user", "password": "BrandNewPass2026!"})
+    assert login_resp2.status_code == 200
+    assert login_resp2.get_json()["success"] is True
+
+
+def test_master_admin_cannot_be_deactivated(client):
+    admin_token = app_module.issue_token("Javohir", "admin")
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    resp = client.put("/api/users/Javohir", json={"is_active": False}, headers=headers)
+    assert resp.status_code == 400
+    assert resp.get_json()["success"] is False
+
+
+def test_default_kiosk_accounts_seeded(tmp_path, monkeypatch):
+    empty_users_file = tmp_path / "empty_users.json"
+    monkeypatch.setattr(app_module, "USERS_FILE", str(empty_users_file))
+
+    loaded = app_module.load_users()
+    usernames = {u["username"] for u in loaded}
+    expected_kiosks = [k["username"] for k in app_module.DEFAULT_KIOSK_ACCOUNTS]
+
+    for ek in expected_kiosks:
+        assert ek in usernames
+
+
+def test_excel_import_extracts_all_fields_and_is_idempotent(tmp_path):
+    import io
+    import pandas as pd
+
+    db_path = str(tmp_path / "test_import.db")
+    database.init_db(db_path)
+    email_map = app_module.DEFAULT_EMAIL_MAP
+
+    data = {
+        "№": [1, 2, 3],
+        "Код заказа": ["ORD101", "ORD102", "ORD103"],
+        "Дата создания": ["01.08.2026 10:00", "01.08.2026 11:00", "01.08.2026 12:00"],
+        "Пользователь": ["samarqandkiosk@railway.uz", "samarqandkiosk@railway.uz", "unknown_user@gmail.com"],
+        "Номера билетов": ["TK1001, TK1002", "TK1003", "TK9999"],
+        "Количество билетов": [2, 1, 1],
+        "Номера поездов": ["001Ф", "002Ф", "003Ф"],
+        "Организация": ["Afrosiyob", "Default", "Other"],
+        "Станция отправления": ["САМАРКАНД", "САМАРКАНД", "ТОШКЕНТ"],
+        "Станция прибытия": ["ТОШКЕНТ-ЙУЛОВЧИ", "БУХОРО 1", "АНДИЖОН"],
+        "Общая стоимость": [400000, 150000, 200000],
+        "Страховка": [4000, 2000, 1000],
+        "Статус": ["ACTIVE", "ACTIVE", "ACTIVE"],
+        "Способ оплаты": ["Payme", "HamkorbankHold", "Payme"],
+    }
+    df = pd.DataFrame(data)
+    excel_buf = io.BytesIO()
+    with pd.ExcelWriter(excel_buf, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="Orders List", index=False)
+    excel_bytes = excel_buf.getvalue()
+
+    # Import #1
+    res1 = database.smart_parse_and_save_excel(db_path, excel_bytes, "test.xlsx", email_map)
+    assert res1["status"] == "success"
+    # Row 1 splits into 2 tickets (TK1001, TK1002), Row 2 is 1 ticket (TK1003), Row 3 is unknown email (skipped)
+    assert res1["metrics"]["inserted"] == 3
+    assert res1["metrics"]["skipped_not_whitelisted"] == 1
+    assert res1["metrics"]["inserted_amount"] == 550000.0
+
+    # Import #2 (same file) -> 0 inserted, 3 skipped (idempotent!)
+    res2 = database.smart_parse_and_save_excel(db_path, excel_bytes, "test.xlsx", email_map)
+    assert res2["status"] == "success"
+    assert res2["metrics"]["inserted"] == 0
+    assert res2["metrics"]["skipped"] == 3
+
+    # Verify extracted fields in database
+    conn = database.get_db_connection(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT ticket_number, organization, payment_method, train_numbers, departure_station, arrival_station, insurance, summa FROM tickets ORDER BY ticket_number")
+    rows = cursor.fetchall()
+    conn.close()
+
+    assert len(rows) == 3
+    # Row 1 split
+    assert rows[0]["ticket_number"] == "TK1001"
+    assert rows[0]["organization"] == "Afrosiyob"
+    assert rows[0]["payment_method"] == "Payme"
+    assert rows[0]["train_numbers"] == "001Ф"
+    assert rows[0]["departure_station"] == "САМАРКАНД"
+    assert rows[0]["arrival_station"] == "ТОШКЕНТ-ЙУЛОВЧИ"
+    assert rows[0]["summa"] == 200000.0
+    assert rows[0]["insurance"] == 2000.0
+

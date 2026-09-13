@@ -1023,6 +1023,28 @@ document.addEventListener('DOMContentLoaded', () => {
                         const regionLabel = u.region
                             ? ((currentMappings[u.region] && currentMappings[u.region].station) || u.region)
                             : (u.role === 'admin' ? "Barchasi" : "Cheklanmagan");
+                        const isMaster = (u.username === 'admin' || u.username.toLowerCase() === 'javohir');
+                        const isActive = u.is_active !== false;
+                        const statusBadge = isActive
+                            ? `<span class="badge badge-emerald" style="padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700;">Faol</span>`
+                            : `<span class="badge badge-rose" style="padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700;">Nofaol</span>`;
+
+                        const actionButtons = isMaster
+                            ? '<span style="font-size:11px; color:var(--text-secondary);">(Bosh Admin)</span>'
+                            : `
+                                <div style="display: flex; align-items: center; gap: 4px;">
+                                    <button class="btn-icon-only btn-sm" style="color:${isActive ? 'var(--accent-amber)' : 'var(--accent-emerald)'}; padding: 2px 6px;" title="${isActive ? 'Faolsizlantirish' : 'Faollashtirish'}" onclick="toggleUserStatus('${u.username}', ${isActive ? 'false' : 'true'})">
+                                        <i class="fa-solid ${isActive ? 'fa-ban' : 'fa-check'}"></i>
+                                    </button>
+                                    <button class="btn-icon-only btn-sm" style="color:var(--accent-cyan); padding: 2px 6px;" title="Parolni o'zgartirish" onclick="promptResetPassword('${u.username}')">
+                                        <i class="fa-solid fa-key"></i>
+                                    </button>
+                                    <button class="btn-icon-only btn-sm" style="color:var(--accent-rose); padding: 2px 6px;" title="O'chirish" onclick="deleteUserAccount('${u.username}')">
+                                        <i class="fa-solid fa-trash"></i>
+                                    </button>
+                                </div>
+                            `;
+
                         return `
                         <tr>
                             <td><strong>${u.username}</strong></td>
@@ -1033,9 +1055,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                 </span>
                             </td>
                             <td>${regionLabel}</td>
-                            <td>
-                                ${u.username !== 'admin' ? `<button class="btn-icon-only btn-sm" style="color:var(--accent-rose); padding: 2px 6px;" title="O'chirish" onclick="deleteUserAccount('${u.username}')"><i class="fa-solid fa-trash"></i></button>` : '<span style="font-size:11px; color:var(--text-secondary);">(Bosh Admin)</span>'}
-                            </td>
+                            <td>${statusBadge}</td>
+                            <td>${actionButtons}</td>
                         </tr>
                     `;
                     }).join('');
@@ -1095,6 +1116,45 @@ document.addEventListener('DOMContentLoaded', () => {
             .catch(err => showToast('error', 'Xatolik', err.message));
         });
     }
+
+    window.toggleUserStatus = function(username, newStatus) {
+        const actionText = newStatus ? "faollashtirmoqchimisiz" : "faolsizlantirmoqchimisiz";
+        if (!confirm(`Haqiqatan ham '${username}' hisobini ${actionText}?`)) return;
+        fetch(getApiUrl(`/api/users/${username}`), {
+            method: 'PUT',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ is_active: newStatus })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast('success', 'Muvaffaqiyatli', data.message);
+                fetchUsers();
+            } else {
+                showToast('error', 'Xatolik', data.error);
+            }
+        })
+        .catch(err => showToast('error', 'Xatolik', err.message));
+    };
+
+    window.promptResetPassword = function(username) {
+        const newPassword = prompt(`'${username}' uchun yangi parolni kiriting:`);
+        if (!newPassword || !newPassword.trim()) return;
+        fetch(getApiUrl(`/api/users/${username}`), {
+            method: 'PUT',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ password: newPassword.trim() })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast('success', 'Parol O\'zgartirildi', data.message);
+            } else {
+                showToast('error', 'Xatolik', data.error);
+            }
+        })
+        .catch(err => showToast('error', 'Xatolik', err.message));
+    };
 
     window.deleteUserAccount = function(username) {
         if (!confirm(`Haqiqatan ham '${username}' foydalanuvchisini o'chirmoqchimisiz?`)) return;
@@ -1742,18 +1802,31 @@ document.addEventListener('DOMContentLoaded', () => {
         uploadLogsTableBody.innerHTML = '';
 
         if (!logs || logs.length === 0) {
-            uploadLogsTableBody.innerHTML = '<tr><td colspan="5" class="empty-row">Audit tarixi topilmadi</td></tr>';
+            uploadLogsTableBody.innerHTML = '<tr><td colspan="9" class="empty-row">Audit tarixi topilmadi</td></tr>';
             return;
         }
 
         logs.forEach((log, idx) => {
             const tr = document.createElement('tr');
+            const totalRows = (log.total_rows || log.rows || 0).toLocaleString();
+            const relRows = log.relevant_rows !== undefined ? log.relevant_rows.toLocaleString() : '-';
+            const newTix = log.new_tickets !== undefined ? log.new_tickets.toLocaleString() : '-';
+            const dupTix = log.duplicate_tickets !== undefined ? log.duplicate_tickets.toLocaleString() : '-';
+            const totSum = (log.total_amount || 0) > 0 ? (log.total_amount.toLocaleString() + " so'm") : '-';
+            const isSuccess = log.status && log.status.toLowerCase().includes('muvaffaq');
+            const statusClass = isSuccess ? 'status-badge' : 'badge badge-rose';
+            const statusIcon = isSuccess ? 'fa-check' : 'fa-triangle-exclamation';
+
             tr.innerHTML = `
                 <td><strong>${idx + 1}</strong></td>
                 <td><i class="fa-solid fa-file-excel" style="color: var(--accent-emerald); margin-right: 6px;"></i> <strong>${log.filename}</strong></td>
-                <td><strong>${(log.rows || 0).toLocaleString()} ta qator</strong></td>
-                <td>${log.timestamp}</td>
-                <td><span class="status-badge" style="display: inline-flex;"><i class="fa-solid fa-check"></i> ${log.status}</span></td>
+                <td><strong>${totalRows}</strong></td>
+                <td>${relRows}</td>
+                <td><strong style="color: var(--accent-cyan);">${newTix}</strong></td>
+                <td><span style="color: var(--accent-amber);">${dupTix}</span></td>
+                <td>${totSum}</td>
+                <td style="font-size: 12px; color: var(--text-secondary);">${log.timestamp}</td>
+                <td><span class="${statusClass}" style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 6px; font-size: 11px;"><i class="fa-solid ${statusIcon}"></i> ${log.status}</span></td>
             `;
             uploadLogsTableBody.appendChild(tr);
         });

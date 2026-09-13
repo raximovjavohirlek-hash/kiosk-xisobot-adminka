@@ -168,6 +168,22 @@ def safe_copy_file(src, dst):
 def is_hashed_password(pw):
     return isinstance(pw, str) and pw.startswith(('pbkdf2:', 'scrypt:', 'argon2:'))
 
+DEFAULT_KIOSK_ACCOUNTS = [
+    {"username": "samarqandkiosk", "name": "Samarqand Kassa", "region": "samarqandkiosk@railway.uz"},
+    {"username": "urganchkiosk", "name": "Urganch Kassa", "region": "urganchkiosk@railway.uz"},
+    {"username": "khivakiosk", "name": "Xiva Kassa", "region": "khivakiosk@railway.uz"},
+    {"username": "navoiykiosk", "name": "Navoiy Kassa", "region": "navoiykiosk@railway.uz"},
+    {"username": "buxorokiosk", "name": "Buxoro Kassa", "region": "buxorokiosk@railway.uz"},
+    {"username": "qongirotkiosk", "name": "Qo'ng'irot Kassa", "region": "qongirotkiosk@railway.uz"},
+    {"username": "nukuskiosk", "name": "Nukus Kassa", "region": "nukuskiosk@railway.uz"},
+    {"username": "andijonkiosk", "name": "Andijon Kassa", "region": "andijonkiosk@railway.uz"},
+    {"username": "qoqonkiosk", "name": "Qo'qon Kassa", "region": "qoqonkiosk@railway.uz"},
+    {"username": "margilonkiosk", "name": "Marg'ilon Kassa", "region": "margilonkiosk@railway.uz"},
+    {"username": "namangankiosk", "name": "Namangan Kassa", "region": "namangankiosk@railway.uz"},
+    {"username": "termizkiosk", "name": "Termiz Kassa", "region": "termizkiosk@railway.uz"},
+    {"username": "qarshikiosk", "name": "Qarshi Kassa", "region": "qarshikiosk@railway.uz"},
+]
+
 def load_users():
     users = None
     if os.path.exists(USERS_FILE):
@@ -188,13 +204,33 @@ def load_users():
             "password": generate_password_hash(master_pass, method='pbkdf2:sha256'),
             "name": "Bosh Administrator (Javohir)",
             "role": "admin",
+            "region": None,
+            "is_active": True,
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         })
-        save_users(users)
-        return users
 
     migrated = False
+    existing_usernames = {str(u.get('username', '')).strip().lower() for u in users}
+
+    for k in DEFAULT_KIOSK_ACCOUNTS:
+        u_kiosk = k['username'].lower()
+        if u_kiosk not in existing_usernames:
+            users.append({
+                "username": k['username'],
+                "password": generate_password_hash("Kiosk2026!", method='pbkdf2:sha256'),
+                "name": k['name'],
+                "role": "user",
+                "region": k['region'],
+                "is_active": True,
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
+            existing_usernames.add(u_kiosk)
+            migrated = True
+
     for u in users:
+        if 'is_active' not in u:
+            u['is_active'] = True
+            migrated = True
         pw = u.get('password', '')
         if pw and not is_hashed_password(pw):
             u['password'] = generate_password_hash(pw, method='pbkdf2:sha256')
@@ -258,16 +294,26 @@ def load_upload_logs():
             pass
     return []
 
-def add_upload_log(filename, rows_count, status="Muvaffaqiyatli"):
+def add_upload_log(filename, total_rows=0, relevant_rows=0, new_tickets=0, duplicate_tickets=0, invalid_records=0, total_amount=0.0, status="Muvaffaqiyatli", uploaded_by="admin", error_message=""):
     logs = load_upload_logs()
+    import_id = len(logs) + 1
     logs.insert(0, {
-        "id": len(logs) + 1,
+        "id": import_id,
+        "import_id": f"IMP-{int(time.time())}-{import_id}",
         "filename": filename,
-        "rows": rows_count,
+        "total_rows": int(total_rows or 0),
+        "rows": int(total_rows or 0),  # backwards compatibility
+        "relevant_rows": int(relevant_rows or 0),
+        "new_tickets": int(new_tickets or 0),
+        "duplicate_tickets": int(duplicate_tickets or 0),
+        "invalid_records": int(invalid_records or 0),
+        "total_amount": float(total_amount or 0.0),
+        "uploaded_by": uploaded_by,
+        "error_message": error_message,
         "timestamp": datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
         "status": status
     })
-    logs = logs[:50]
+    logs = logs[:100]
     with open(UPLOAD_LOGS_FILE, 'w', encoding='utf-8') as f:
         json.dump(logs, f, ensure_ascii=False, indent=2)
 
@@ -979,26 +1025,53 @@ def upload_file():
         STATS_CACHE = stats
         
         metrics = parse_result.get('metrics', {})
-        tot_read = metrics.get('total_read', 1)
-        n_ins = metrics.get('inserted', 1)
+        tot_read = metrics.get('total_read', 0)
+        tot_excel = metrics.get('total_excel_rows', tot_read)
+        rel_rows = metrics.get('relevant_kiosk_rows', tot_read)
+        n_ins = metrics.get('inserted', 0)
         n_skip = metrics.get('skipped', 0)
-        
-        add_upload_log(orig_filename, tot_read, "Muvaffaqiyatli")
-        
+        n_invalid = metrics.get('rejected_invalid', 0)
+        ins_amount = metrics.get('inserted_amount', 0.0)
+        uploader = getattr(request, 'auth_user', {}).get('username', 'admin')
+
+        add_upload_log(
+            filename=orig_filename,
+            total_rows=tot_excel,
+            relevant_rows=rel_rows,
+            new_tickets=n_ins,
+            duplicate_tickets=n_skip,
+            invalid_records=n_invalid,
+            total_amount=ins_amount,
+            status="Muvaffaqiyatli",
+            uploaded_by=uploader
+        )
+        add_audit_log('excel_upload', uploader, detail=f"{orig_filename}: {n_ins} yangi, {n_skip} dublikat, {ins_amount:,.0f} so'm")
+
         return jsonify({
             'status': 'success',
             'success': True,
-            'message': parse_result.get('message', "Fayl muvaffaqiyatli yuklandi va ma'lumotlar bazasiga saqlandi!"), 
+            'message': parse_result.get('message', "Fayl muvaffaqiyatli yuklandi va ma'lumotlar bazasiga saqlandi!"),
             'upload_stats': {
-                'total_rows_read': tot_read,
+                'total_rows_read': tot_excel,
+                'relevant_kiosk_rows': rel_rows,
                 'new_tickets_inserted': n_ins,
-                'existing_tickets_skipped': n_skip
+                'existing_tickets_skipped': n_skip,
+                'invalid_records': n_invalid,
+                'total_imported_amount': ins_amount
             },
             'stats': stats
         })
     except Exception as e:
         fn = request.files['file'].filename if 'file' in request.files else 'unknown'
-        add_upload_log(fn, 0, f"Xatolik: {str(e)}")
+        uploader = getattr(request, 'auth_user', {}).get('username', 'admin')
+        add_upload_log(
+            filename=fn,
+            total_rows=0,
+            status="Xatolik",
+            uploaded_by=uploader,
+            error_message=str(e)
+        )
+        add_audit_log('excel_upload_fail', uploader, detail=f"{fn}: {str(e)}", success=False)
         return jsonify({'status': 'error', 'message': f"Fayl yuklashda server xatoligi yuz berdi: {str(e)}"}), 500
 
 @app.route('/api/sync-tickets', methods=['POST'])
@@ -1458,6 +1531,11 @@ def auth_login():
     for u in users:
         u_name = str(u.get('username', '')).strip().lower()
         if u_name == username:
+            if not u.get('is_active', True):
+                record_login_attempt(client_ip, username, success=False)
+                add_audit_log('login_fail_inactive', u.get('username', username), detail='account_deactivated', success=False)
+                return jsonify({'success': False, 'error': "Ushbu foydalanuvchi hisobi faolsizlantirilgan (bloklangan)!"}), 403
+
             if verify_user_password(u.get('password', ''), password):
                 record_login_attempt(client_ip, username, success=True)
                 role = u.get('role', 'user')
@@ -1472,7 +1550,8 @@ def auth_login():
                         'username': u.get('username', username),
                         'name': u.get('name', u.get('username', username)),
                         'role': role,
-                        'region': region
+                        'region': region,
+                        'is_active': u.get('is_active', True)
                     }
                 })
             break
@@ -1491,6 +1570,7 @@ def manage_users():
             'name': u.get('name'),
             'role': u.get('role', 'user'),
             'region': u.get('region'),
+            'is_active': u.get('is_active', True),
             'created_at': u.get('created_at', '')
         } for u in users]
         return jsonify({'success': True, 'users': safe_users})
@@ -1502,6 +1582,9 @@ def manage_users():
         name = str(data.get('name', '')).strip() or username
         role = str(data.get('role', 'user')).strip().lower()
         region = str(data.get('region', '')).strip().lower() or None
+        is_active = data.get('is_active', True)
+        if isinstance(is_active, str):
+            is_active = is_active.lower() in ('true', '1', 'yes')
 
         if not username or not password:
             return jsonify({'success': False, 'error': "Login va parol kiritilishi shart!"}), 400
@@ -1523,17 +1606,82 @@ def manage_users():
             'name': name,
             'role': role,
             'region': region,
+            'is_active': bool(is_active),
             'created_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         })
         save_users(users)
         add_audit_log('user_created', request.auth_user.get('username', ''), detail=f"created {username} role={role} region={region}")
         return jsonify({'success': True, 'message': f"Foydalanuvchi '{username}' muvaffaqiyatli qo'shildi!"})
 
+@app.route('/api/users/<username>', methods=['PUT', 'PATCH'])
+@require_auth(role='admin')
+def update_user(username):
+    username_clean = str(username).strip().lower()
+    users = load_users()
+    target_user = None
+    for u in users:
+        if str(u.get('username', '')).strip().lower() == username_clean:
+            target_user = u
+            break
+
+    if not target_user:
+        return jsonify({'success': False, 'error': "Foydalanuvchi topilmadi!"}), 404
+
+    data = request.json or {}
+    admin_user = request.auth_user.get('username', '')
+    is_master = username_clean in ('admin', 'javohir')
+
+    if 'name' in data:
+        target_user['name'] = str(data['name']).strip()
+
+    if 'is_active' in data:
+        new_active = data['is_active']
+        if isinstance(new_active, str):
+            new_active = new_active.lower() in ('true', '1', 'yes')
+        if is_master and not new_active:
+            return jsonify({'success': False, 'error': "Bosh administrator hisobini faolsizlantirib bo'lmaydi!"}), 400
+        target_user['is_active'] = bool(new_active)
+
+    if 'role' in data:
+        new_role = str(data['role']).strip().lower()
+        if is_master and new_role != 'admin':
+            return jsonify({'success': False, 'error': "Bosh administrator rolini o'zgartirib bo'lmaydi!"}), 400
+        target_user['role'] = new_role
+
+    if 'region' in data:
+        new_region = str(data['region']).strip().lower() or None
+        if target_user.get('role') == 'admin':
+            new_region = None
+        elif new_region:
+            allowed_emails = {str(k).strip().lower() for k in load_mappings().keys()}
+            if new_region not in allowed_emails:
+                return jsonify({'success': False, 'error': "Noma'lum kassa/hudud tanlandi!"}), 400
+        target_user['region'] = new_region
+
+    if 'password' in data and str(data['password']).strip():
+        new_pass = str(data['password']).strip()
+        target_user['password'] = generate_password_hash(new_pass, method='pbkdf2:sha256')
+        add_audit_log('password_reset', admin_user, detail=f"password reset for {username_clean}")
+
+    save_users(users)
+    add_audit_log('user_updated', admin_user, detail=f"updated {username_clean} (active={target_user.get('is_active')}, role={target_user.get('role')})")
+    return jsonify({
+        'success': True,
+        'message': f"Foydalanuvchi '{username_clean}' muvaffaqiyatli tahrirlandi!",
+        'user': {
+            'username': target_user.get('username'),
+            'name': target_user.get('name'),
+            'role': target_user.get('role'),
+            'region': target_user.get('region'),
+            'is_active': target_user.get('is_active', True)
+        }
+    })
+
 @app.route('/api/users/<username>', methods=['DELETE'])
 @require_auth(role='admin')
 def delete_user(username):
     username_clean = str(username).strip().lower()
-    if username_clean == 'admin':
+    if username_clean in ('admin', 'javohir'):
         return jsonify({'success': False, 'error': "Bosh admin foydalanuvchisini o'chirib bo'lmaydi!"}), 400
 
     users = load_users()
