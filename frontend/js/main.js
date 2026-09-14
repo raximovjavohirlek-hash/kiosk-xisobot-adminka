@@ -339,7 +339,7 @@ document.addEventListener('DOMContentLoaded', () => {
             peakDay = dailyList.reduce((max, d) => (d.summa > max.summa ? d : max), dailyList[0]);
         }
         if (modalStPeakDate) modalStPeakDate.textContent = peakDay.summa > 0 ? peakDay.date : 'Yo\'q';
-        if (modalStPeakSum) modalStPeakSum.textContent = peakDay.summa > 0 ? `${peakDay.summa.toLocaleString('uz-UZ')} so'm (${peakDay.tickets} ta)` : 'Sotuv bo\'lmagan';
+        if (modalStPeakSum) modalStPeakSum.textContent = peakDay.summa > 0 ? `${Math.round(peakDay.summa).toLocaleString('uz-UZ')} so'm (${peakDay.tickets} ta)` : 'Sotuv bo\'lmagan';
         if (modalStTotalDaysCount) modalStTotalDaysCount.textContent = `Jami ${dailyList.length} kunlik ko'rsatkichlar`;
 
         // Render Daily Sales Table Body
@@ -363,8 +363,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     tr.innerHTML = `
                         <td><strong>${day.date}</strong></td>
                         <td style="text-align: right;"><span class="number-cell-tickets" style="font-size: 12px; padding: 3px 8px;">${day.tickets.toLocaleString('uz-UZ')} ta</span></td>
-                        <td style="text-align: right;"><span class="number-cell-summa" style="font-size: 12px; padding: 3px 8px;">${day.summa.toLocaleString('uz-UZ')} so'm</span></td>
-                        <td style="text-align: right;"><span class="number-cell-avg" style="font-size: 12px; padding: 3px 8px;">${dayAvgP.toLocaleString('uz-UZ')} so'm</span></td>
+                        <td style="text-align: right;"><span class="number-cell-summa" style="font-size: 12px; padding: 3px 8px;">${Math.round(day.summa).toLocaleString('uz-UZ')} so'm</span></td>
+                        <td style="text-align: right;"><span class="number-cell-avg" style="font-size: 12px; padding: 3px 8px;">${Math.round(dayAvgP).toLocaleString('uz-UZ')} so'm</span></td>
                         <td style="text-align: center;">${statusBadge}</td>
                     `;
                     if (isPeak) {
@@ -1041,7 +1041,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${dayBadge}</td>
                 <td>${ov.station_name || ov.email}</td>
                 <td><span class="number-cell-tickets">${ov.override_tickets !== null && ov.override_tickets !== undefined ? ov.override_tickets.toLocaleString('uz-UZ') + ' ta' : 'Asl'}</span></td>
-                <td><span class="number-cell-summa">${ov.override_summa !== null && ov.override_summa !== undefined ? ov.override_summa.toLocaleString('uz-UZ') + " so'm" : 'Asl'}</span></td>
+                <td><span class="number-cell-summa">${ov.override_summa !== null && ov.override_summa !== undefined ? Math.round(ov.override_summa).toLocaleString('uz-UZ') + " so'm" : 'Asl'}</span></td>
                 <td style="font-size: 12px; opacity: 0.8;">${ov.updated_at || '-'}</td>
                 <td>
                     <button class="btn-icon-only btn-sm" style="color: var(--accent-rose);" onclick="deleteOverride('${ov.ym}', '${ov.email}', '${ov.day_str || 'ALL'}')" title="Tahrirni bekor qilish">
@@ -1618,7 +1618,7 @@ document.addEventListener('DOMContentLoaded', () => {
             online_percent: onlinePct,
             terminal_percent: terminalPct,
             period_name: periodTitle,
-            ai_recommendation: `Hurmatli Rahbariyat, <strong>${periodTitle}</strong> bo'yicha kiosklar orqali jami <strong>${tSum.toLocaleString('uz-UZ')} so'm</strong> tushum hamda <strong>${tTix.toLocaleString('uz-UZ')} ta</strong> chipta sotildi. Bitta chiptaning o'rtacha narxi <strong>${avgP.toLocaleString('uz-UZ')} so'mni</strong> va kunlik o'rtacha tushum <strong>${dAvgS.toLocaleString('uz-UZ')} so'mni</strong> tashkil etdi. Eng savdoli kassa <strong>${topSt.stansiya}</strong> bo'lib, uning umumiy tushumdagi ulushi <strong>${topSt.share_percent}%</strong> ni tashkil qiladi. Eng yuqori kunlik savdo ko'rsatkichi <strong>${peakDay.date}</strong> sanasida (<strong>${(peakDay.summa || 0).toLocaleString('uz-UZ')} so'm</strong>) qayd etilgan.`
+            ai_recommendation: `Hurmatli Rahbariyat, <strong>${periodTitle}</strong> bo'yicha kiosklar orqali jami <strong>${Math.round(tSum).toLocaleString('uz-UZ')} so'm</strong> tushum hamda <strong>${tTix.toLocaleString('uz-UZ')} ta</strong> chipta sotildi. Bitta chiptaning o'rtacha narxi <strong>${Math.round(avgP).toLocaleString('uz-UZ')} so'mni</strong> va kunlik o'rtacha tushum <strong>${Math.round(dAvgS).toLocaleString('uz-UZ')} so'mni</strong> tashkil etdi. Eng savdoli kassa <strong>${topSt.stansiya}</strong> bo'lib, uning umumiy tushumdagi ulushi <strong>${topSt.share_percent}%</strong> ni tashkil qiladi. Eng yuqori kunlik savdo ko'rsatkichi <strong>${peakDay.date}</strong> sanasida (<strong>${Math.round(peakDay.summa || 0).toLocaleString('uz-UZ')} so'm</strong>) qayd etilgan.`
         };
     }
 
@@ -1832,10 +1832,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             <span class="number-cell-tickets">${st.soni_val.toLocaleString('uz-UZ')} ta</span>
                         </td>
                         <td style="text-align: right;">
-                            <span class="number-cell-summa">${st.summa_val.toLocaleString('uz-UZ')} so'm</span>
+                            <span class="number-cell-summa">${Math.round(st.summa_val).toLocaleString('uz-UZ')} so'm</span>
                         </td>
                         <td style="text-align: right;">
-                            <span class="number-cell-avg">${avgP.toLocaleString('uz-UZ')} so'm</span>
+                            <span class="number-cell-avg">${Math.round(avgP).toLocaleString('uz-UZ')} so'm</span>
                         </td>
                         <td>
                             <div class="share-cell">
@@ -1866,10 +1866,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             <span class="number-cell-tickets total">${grandTickets.toLocaleString('uz-UZ')} ta</span>
                         </td>
                         <td style="text-align: right;">
-                            <span class="number-cell-summa total">${grandSumma.toLocaleString('uz-UZ')} so'm</span>
+                            <span class="number-cell-summa total">${Math.round(grandSumma).toLocaleString('uz-UZ')} so'm</span>
                         </td>
                         <td style="text-align: right;">
-                            <span class="number-cell-avg total">${grandAvgP.toLocaleString('uz-UZ')} so'm</span>
+                            <span class="number-cell-avg total">${Math.round(grandAvgP).toLocaleString('uz-UZ')} so'm</span>
                         </td>
                         <td>
                             <div class="share-cell">
@@ -2061,7 +2061,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const relRows = log.relevant_rows !== undefined ? log.relevant_rows.toLocaleString() : '-';
             const newTix = log.new_tickets !== undefined ? log.new_tickets.toLocaleString() : '-';
             const dupTix = log.duplicate_tickets !== undefined ? log.duplicate_tickets.toLocaleString() : '-';
-            const totSum = (log.total_amount || 0) > 0 ? (log.total_amount.toLocaleString() + " so'm") : '-';
+            const totSum = (log.total_amount || 0) > 0 ? (Math.round(log.total_amount).toLocaleString() + " so'm") : '-';
             const isSuccess = log.status && log.status.toLowerCase().includes('muvaffaq');
             const statusClass = isSuccess ? 'status-badge' : 'badge badge-rose';
             const statusIcon = isSuccess ? 'fa-check' : 'fa-triangle-exclamation';
@@ -2146,7 +2146,7 @@ document.addEventListener('DOMContentLoaded', () => {
             tr.innerHTML = `
                 <td><strong>${item.date}</strong></td>
                 <td><strong>${item.tickets.toLocaleString('uz-UZ')} ta</strong></td>
-                <td><strong style="color: var(--accent-emerald);">${item.summa.toLocaleString('uz-UZ')} so'm</strong></td>
+                <td><strong style="color: var(--accent-emerald);">${Math.round(item.summa).toLocaleString('uz-UZ')} so'm</strong></td>
                 <td>
                     <div class="payment-type-cell" title="${tooltipDetail}">
                         <div class="payment-type-track">
@@ -2257,9 +2257,9 @@ document.addEventListener('DOMContentLoaded', () => {
             tr.innerHTML = `
                 <td><strong>${idx + 1}</strong></td>
                 <td><i class="fa-solid fa-location-dot" style="color: var(--accent-cyan); margin-right: 6px;"></i> <strong>${s.stansiya}</strong></td>
-                <td>${baseSum.toLocaleString('uz-UZ')} so'm</td>
-                <td><strong style="color: var(--accent-emerald);">${s.summa_val.toLocaleString('uz-UZ')} so'm</strong></td>
-                <td><strong style="color: ${isPos ? 'var(--accent-emerald)' : 'var(--accent-rose)'};">${isPos ? '+' : ''}${diffSum.toLocaleString('uz-UZ')} so'm</strong></td>
+                <td>${Math.round(baseSum).toLocaleString('uz-UZ')} so'm</td>
+                <td><strong style="color: var(--accent-emerald);">${Math.round(s.summa_val).toLocaleString('uz-UZ')} so'm</strong></td>
+                <td><strong style="color: ${isPos ? 'var(--accent-emerald)' : 'var(--accent-rose)'};">${isPos ? '+' : ''}${Math.round(diffSum).toLocaleString('uz-UZ')} so'm</strong></td>
                 <td><span class="kpi-badge ${isPos ? 'positive' : 'negative'}"><i class="fa-solid fa-arrow-trend-${isPos ? 'up' : 'down'}"></i> ${isPos ? '+' : ''}${diffPct}%</span></td>
             `;
             comparisonTableBody.appendChild(tr);
@@ -2323,7 +2323,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     tooltip: {
                         callbacks: {
                             label: function(context) {
-                                return ` ${context.dataset.label}: ${context.raw.toLocaleString('uz-UZ')} so'm`;
+                                return ` ${context.dataset.label}: ${Math.round(context.raw).toLocaleString('uz-UZ')} so'm`;
                             }
                         }
                     }

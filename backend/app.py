@@ -745,12 +745,13 @@ def enrich_stats_with_executive_metrics(monthly_data_map, overall_data_map, ytd_
         enriched = []
         for st in station_list:
             soni = st.get('soni_val', 0)
-            summa = st.get('summa_val', 0)
+            summa = round(st.get('summa_val', 0))
             avg_price = round(summa / soni) if soni > 0 else 0
             share_pct = round((summa / total_summa * 100), 1) if total_summa > 0 else 0.0
             
             st_copy = dict(st)
             st_copy.update({
+                'summa_val': summa,
                 'avg_price': avg_price,
                 'share_percent': share_pct
             })
@@ -758,7 +759,7 @@ def enrich_stats_with_executive_metrics(monthly_data_map, overall_data_map, ytd_
         return enriched
 
     def build_summary(stats_dict, period_name="ushbu davr"):
-        t_sum = stats_dict.get('total_summa', 0)
+        t_sum = round(stats_dict.get('total_summa', 0))
         t_tix = stats_dict.get('total_tickets', 0)
         avg_p = round(t_sum / t_tix) if t_tix > 0 else 0
 
@@ -785,19 +786,19 @@ def enrich_stats_with_executive_metrics(monthly_data_map, overall_data_map, ytd_
             'daily_avg_revenue': d_avg_s,
             'daily_avg_tickets': d_avg_t,
             'peak_date': peak_day.get('date', '-'),
-            'peak_day_revenue': peak_day.get('summa', 0),
+            'peak_day_revenue': round(peak_day.get('summa', 0)),
             'top_station': top_st.get('stansiya'),
-            'top_station_summa': top_st.get('summa_val', 0),
+            'top_station_summa': round(top_st.get('summa_val', 0)),
             'top_station_share': top_st.get('share_percent', 0),
             'second_station': sec_st.get('stansiya'),
-            'second_station_summa': sec_st.get('summa_val', 0),
+            'second_station_summa': round(sec_st.get('summa_val', 0)),
             'online_percent': on_p,
             'terminal_percent': round(100 - on_p, 1) if on_p else 0.0,
             'period_name': period_name,
             'ai_recommendation': f"Hurmatli Rahbariyat, {period_name} bo'yicha kiosklar orqali jami {t_sum:,} so'm tushum hamda {t_tix:,} ta chipta sotildi. "
                                 f"Bitta chiptaning o'rtacha narxi {avg_p:,} so'mni va kunlik o'rtacha tushum {d_avg_s:,} so'mni tashkil etdi. "
                                 f"Eng savdoli kassa {top_st.get('stansiya')} bo'lib, uning umumiy tushumdagi ulushi {top_st.get('share_percent')}% ni tashkil qiladi. "
-                                f"Eng yuqori kunlik savdo ko'rsatkichi {peak_day.get('date')} sanasida ({peak_day.get('summa', 0):,} so'm) qayd etilgan."
+                                f"Eng yuqori kunlik savdo ko'rsatkichi {peak_day.get('date')} sanasida ({round(peak_day.get('summa', 0)):,} so'm) qayd etilgan."
         }
 
     for ym, m_info in monthly_data_map.items():
@@ -1158,6 +1159,19 @@ def download():
     raw_period = (request.args.get('period') or request.args.get('ym') or 'all').strip()
     db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
     email_map = load_mappings()
+    region = get_auth_region()
+
+    try:
+        from excel_generator import generate_kiosk_excel_report
+        out_buf, dl_filename = generate_kiosk_excel_report(db_path, period=raw_period, region=region, email_map=email_map)
+        return send_file(
+            out_buf,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=dl_filename
+        )
+    except Exception as exc:
+        print("[Excel Download] generate_kiosk_excel_report fallback due to:", exc)
 
     global STATS_CACHE
     db_stats = None

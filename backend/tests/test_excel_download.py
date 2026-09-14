@@ -65,3 +65,22 @@ def test_download_regional_scoping(client):
     assert 'Самарқанд' in ws['A1'].value
     # Max row should be 6 (title, subtitle, blank, header, 1 station, total)
     assert ws.max_row == 6
+
+def test_download_excel_report_charts_and_sheets(client):
+    token = issue_token('Javohir', 'admin')
+    headers = {'Authorization': f'Bearer {token}'}
+
+    res = client.get('/api/download?period=2026-09', headers=headers)
+    assert res.status_code == 200
+    wb = openpyxl.load_workbook(io.BytesIO(res.data))
+    assert 'Лист1' in wb.sheetnames
+    assert 'Худудлар' in wb.sheetnames
+    assert 'Жами' in wb.sheetnames
+    assert 'Ойлар кесимида' in wb.sheetnames
+    assert wb.active.title == 'Лист1'
+    assert len(wb['Лист1']._charts) == 2
+    # Verify top stations formulas
+    ws_list1 = wb['Лист1']
+    assert str(ws_list1.cell(4, 3).value).startswith('=Худудлар!')
+    assert str(ws_list1.cell(4, 4).value).startswith('=Худудлар!')
+

@@ -232,6 +232,11 @@ def init_db(db_path):
         )
     ''')
 
+    try:
+        cursor.execute("UPDATE tickets SET summa = ROUND(summa) WHERE summa != ROUND(summa)")
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -283,10 +288,10 @@ def rebuild_aggregates_from_tickets(db_path, email_map):
                 ''', (ym, ym_raw, em_lower))
                 st_row = cursor.fetchone()
                 raw_t = int(st_row[0] or 0)
-                raw_s = float(st_row[1] or 0.0)
+                raw_s = round(float(st_row[1] or 0.0))
 
                 st_tickets = raw_t
-                st_summa = raw_s
+                st_summa = round(raw_s)
 
                 # Apply manual admin override if present
                 if (ym, em_lower) in overrides_map:
@@ -294,7 +299,7 @@ def rebuild_aggregates_from_tickets(db_path, email_map):
                     if ov_t is not None:
                         st_tickets = int(ov_t)
                     if ov_s is not None:
-                        st_summa = float(ov_s)
+                        st_summa = round(float(ov_s))
                     elif ov_t is not None and raw_t > 0 and raw_s > 0:
                         st_summa = round(st_tickets * (raw_s / raw_t))
 
@@ -302,11 +307,11 @@ def rebuild_aggregates_from_tickets(db_path, email_map):
                     'station_name': st_name,
                     'email': em_lower,
                     'tickets': st_tickets,
-                    'summa': st_summa
+                    'summa': round(st_summa)
                 }
 
             tot_tickets = sum(d['tickets'] for d in month_station_data.values())
-            tot_summa = sum(d['summa'] for d in month_station_data.values())
+            tot_summa = round(sum(d['summa'] for d in month_station_data.values()))
 
             # Update monthly_summaries for this ym
             cursor.execute('''
@@ -346,20 +351,20 @@ def rebuild_aggregates_from_tickets(db_path, email_map):
                 
                 if sdb_rows:
                     raw_sdb_tix = sum(int(r[1] or 0) for r in sdb_rows)
-                    raw_sdb_sum = sum(float(r[2] or 0.0) for r in sdb_rows)
+                    raw_sdb_sum = round(sum(float(r[2] or 0.0) for r in sdb_rows))
                     
                     scale_t = st_tix / raw_sdb_tix if raw_sdb_tix > 0 else 1.0
                     scale_s = st_sum / raw_sdb_sum if raw_sdb_sum > 0 else scale_t
 
                     accum_t = 0
-                    accum_s = 0.0
+                    accum_s = 0
                     for idx_sdb, sdb in enumerate(sdb_rows):
                         d_str = sdb[0]
                         if not d_str:
                             continue
                         if idx_sdb == len(sdb_rows) - 1:
                             d_tix = max(0, st_tix - accum_t)
-                            d_sum = max(0.0, st_sum - accum_s)
+                            d_sum = max(0, round(st_sum - accum_s))
                         else:
                             d_tix = round(int(sdb[1] or 0) * scale_t)
                             d_sum = round(float(sdb[2] or 0.0) * scale_s)
@@ -422,12 +427,12 @@ def rebuild_aggregates_from_tickets(db_path, email_map):
                             kassa_summa = excluded.kassa_summa
                     ''', (
                         ym, d_str,
-                        int(d[1] or 0), float(d[2] or 0.0),
-                        int(d[3] or 0), float(d[4] or 0.0),
-                        int(d[5] or 0), float(d[6] or 0.0),
-                        int(d[7] or 0), float(d[8] or 0.0),
-                        int(d[9] or 0), float(d[10] or 0.0),
-                        int(d[11] or 0), float(d[12] or 0.0)
+                        int(d[1] or 0), round(float(d[2] or 0.0)),
+                        int(d[3] or 0), round(float(d[4] or 0.0)),
+                        int(d[5] or 0), round(float(d[6] or 0.0)),
+                        int(d[7] or 0), round(float(d[8] or 0.0)),
+                        int(d[9] or 0), round(float(d[10] or 0.0)),
+                        int(d[11] or 0), round(float(d[12] or 0.0))
                     ))
 
         conn.commit()
@@ -576,7 +581,7 @@ def batch_upsert_tickets(db_path, ticket_list, batch_size=1000):
                 insurance = 0.0
 
             qty = int(t.get('qty') or 1)
-            summa = float(t.get('summa') or 0.0)
+            summa = round(float(t.get('summa') or 0.0))
             status = str(t.get('status') or 'ACTIVE')
 
             params_batch.append((
@@ -1000,13 +1005,17 @@ def get_all_stats_from_db(db_path, email_map):
                     WHERE ym = ? AND email = ? 
                     ORDER BY date_str ASC
                 ''', (ym, sr['email']))
-                db_rows = [dict(r) for r in cursor.fetchall()]
+                db_rows = []
+                for r in cursor.fetchall():
+                    d_item = dict(r)
+                    d_item['summa'] = round(d_item.get('summa') or 0)
+                    db_rows.append(d_item)
 
                 stations.append({
                     'stansiya': sr['station_name'],
                     'email': sr['email'],
                     'soni_val': sr['tickets'],
-                    'summa_val': sr['summa'],
+                    'summa_val': round(sr['summa']) if sr['summa'] is not None else 0,
                     'share_percent': sr['share_percent'],
                     'daily_breakdown': db_rows
                 })
@@ -1027,11 +1036,16 @@ def get_all_stats_from_db(db_path, email_map):
                 WHERE ym = ?
                 ORDER BY date_str ASC
             ''', (ym,))
-            d_rows = [dict(r) for r in cursor.fetchall()]
+            d_rows = []
+            for r in cursor.fetchall():
+                d_item = dict(r)
+                for k in ('summa', 'online_summa', 'terminal_summa', 'uzcard_summa', 'humo_summa', 'kassa_summa'):
+                    d_item[k] = round(d_item.get(k) or 0)
+                d_rows.append(d_item)
 
             monthly_data[ym] = {
                 'total_tickets': row['total_tickets'],
-                'total_summa': row['total_summa'],
+                'total_summa': round(row['total_summa']) if row['total_summa'] is not None else 0,
                 'stations': stations,
                 'daily_trend': d_rows
             }
