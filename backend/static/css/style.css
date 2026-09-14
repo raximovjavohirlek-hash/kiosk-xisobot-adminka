@@ -1404,6 +1404,36 @@ body.tv-mode .nav-tabs-bar {
     border: 1px solid rgba(56, 189, 248, 0.4);
 }
 
+/* Matrix Table Header Badges */
+.matrix-date-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(56, 189, 248, 0.12);
+    color: var(--accent-cyan);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    font-size: 13.5px;
+    font-weight: 700;
+    padding: 3px 12px;
+    border-radius: 6px;
+    letter-spacing: 0.2px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.matrix-month-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(16, 185, 129, 0.12);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    font-size: 12.5px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 5px;
+    margin-right: 4px;
+}
+
 /* Station Cell */
 .st-cell {
     display: flex;

@@ -1622,6 +1622,78 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    function computeDateRange(stats, periodKey) {
+        let validDates = [];
+        if ((periodKey === 'ytd' || periodKey === 'all') && fullBackendStats && fullBackendStats.monthly_data) {
+            Object.keys(fullBackendStats.monthly_data).forEach(mk => {
+                const mObj = fullBackendStats.monthly_data[mk];
+                (mObj.daily_trend || []).forEach(d => {
+                    if (d && d.date && d.date !== '-') validDates.push(d.date);
+                });
+            });
+        }
+
+        if (validDates.length === 0 && stats && stats.daily_trend) {
+            stats.daily_trend.forEach(d => {
+                if (d && d.date && d.date !== '-') validDates.push(d.date);
+            });
+        }
+
+        const parseDmY = (str) => {
+            if (!str || typeof str !== 'string') return 0;
+            const parts = str.trim().split('.');
+            if (parts.length === 3) {
+                return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10)).getTime();
+            }
+            return 0;
+        };
+
+        validDates.sort((a, b) => parseDmY(a) - parseDmY(b));
+
+        let startDate = "";
+        let endDate = "";
+        let rangeText = "";
+        if (validDates.length > 0) {
+            startDate = validDates[0];
+            endDate = validDates[validDates.length - 1];
+            rangeText = startDate === endDate ? `${startDate} kuni` : `${startDate} dan ${endDate} gacha`;
+        }
+        return { startDate, endDate, rangeText };
+    }
+
+    function updateMatrixTableHeader(stats, periodKey, periodTitle) {
+        const matrixDateRangeText = document.getElementById('matrixDateRangeText');
+        const matrixMonthBadge = document.getElementById('matrixMonthBadge');
+        const matrixSubtitleDateRange = document.getElementById('matrixSubtitleDateRange');
+
+        let monthName = "Sentabr 2026 oyi";
+        if (periodKey === 'ytd') {
+            const yr = (fullBackendStats && fullBackendStats.ytd_data && fullBackendStats.ytd_data.year) ? fullBackendStats.ytd_data.year : '2026';
+            monthName = `${yr}-yil boshidan beri (YTD)`;
+        } else if (periodKey === 'all') {
+            monthName = "Barcha oylar birgalikda";
+        } else if (periodKey === 'latest' && fullBackendStats && fullBackendStats.available_months && fullBackendStats.available_months.length > 0) {
+            monthName = `${fullBackendStats.available_months[0].name} oyi`;
+        } else if (fullBackendStats && fullBackendStats.available_months) {
+            const mMatch = fullBackendStats.available_months.find(m => m.code === periodKey);
+            monthName = mMatch ? `${mMatch.name} oyi` : (periodTitle || "Hisobot Davri");
+        } else if (periodTitle) {
+            monthName = periodTitle;
+        }
+
+        const dateInfo = computeDateRange(stats, periodKey);
+
+        if (matrixDateRangeText) {
+            matrixDateRangeText.textContent = dateInfo.rangeText || "01.09.2026 dan 12.09.2026 gacha";
+        }
+        if (matrixMonthBadge) {
+            matrixMonthBadge.textContent = monthName;
+        }
+        if (matrixSubtitleDateRange) {
+            matrixSubtitleDateRange.textContent = dateInfo.rangeText ? `(${dateInfo.rangeText})` : "";
+        }
+    }
+
     function applyPeriodFilter() {
         if (!fullBackendStats) return;
 
@@ -1650,8 +1722,11 @@ document.addEventListener('DOMContentLoaded', () => {
             currentStats.director_summary = computeExecutiveSummary(currentStats, periodTitle);
         }
 
+        const dateInfo = computeDateRange(currentStats, currentSelectedPeriod);
         const periodBadges = document.querySelectorAll('.active-period-badge-label');
-        periodBadges.forEach(el => { el.textContent = periodTitle; });
+        periodBadges.forEach(el => { 
+            el.textContent = dateInfo.rangeText ? `${periodTitle} (${dateInfo.rangeText})` : periodTitle; 
+        });
 
         const sortedStations = getSortedStations();
         renderDirectorDashboard(currentStats, sortedStations);
@@ -1666,6 +1741,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!stats) return;
         const summary = stats.director_summary || {};
         const stations = sortedStations || getSortedStations(stats);
+
+        // Update Matrix Table Header (Date Range & Month)
+        updateMatrixTableHeader(stats, currentSelectedPeriod, summary.period_name);
 
         // Real Executive KPIs
         if (dirKpiNetRevenue) dirKpiNetRevenue.textContent = formatCurrency(summary.net_revenue || stats.total_summa || 0);

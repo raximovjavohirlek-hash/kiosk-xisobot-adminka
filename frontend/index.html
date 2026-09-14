@@ -228,8 +228,21 @@
                 <section class="table-section glass-card">
                     <div class="card-header flex-between flex-wrap gap-12">
                         <div>
-                            <h3><i class="fa-solid fa-trophy"></i> Kassalar bo'yicha Aniq Moliyaviy Matritsa</h3>
-                            <p class="section-desc">15 ta chiptahona kioski bo'yicha tushgan summa, chiptalar soni va ulushlar jadvali</p>
+                            <div class="matrix-title-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 5px;">
+                                <h3 id="matrixTableTitle" style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                                    <i class="fa-solid fa-trophy" style="color: var(--accent-amber);"></i>
+                                    <span>Kassalar bo'yicha hisobot:</span>
+                                </h3>
+                                <span id="matrixDateRangeBadge" class="matrix-date-badge">
+                                    <i class="fa-regular fa-calendar-days"></i>
+                                    <span id="matrixDateRangeText">01.09.2026 dan 12.09.2026 gacha</span>
+                                </span>
+                            </div>
+                            <p class="section-desc" id="matrixTableSubtitle" style="margin: 0;">
+                                <span id="matrixMonthBadge" class="matrix-month-badge">Sentabr 2026 oyi</span>
+                                <span id="matrixSubtitleDateRange" style="color: var(--accent-cyan); font-weight: 600;">(01.09.2026 dan 12.09.2026 gacha)</span>
+                                <span id="matrixSubtitleText">bo'yicha 15 ta chiptahona kioski tushgan summa, chiptalar soni va ulushlar jadvali</span>
+                            </p>
                         </div>
 
                         <div class="header-controls">
