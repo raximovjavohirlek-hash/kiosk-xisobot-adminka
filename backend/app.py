@@ -795,10 +795,12 @@ def enrich_stats_with_executive_metrics(monthly_data_map, overall_data_map, ytd_
             'online_percent': on_p,
             'terminal_percent': round(100 - on_p, 1) if on_p else 0.0,
             'period_name': period_name,
-            'ai_recommendation': f"Hurmatli Rahbariyat, {period_name} bo'yicha kiosklar orqali jami {t_sum:,} so'm tushum hamda {t_tix:,} ta chipta sotildi. "
-                                f"Bitta chiptaning o'rtacha narxi {avg_p:,} so'mni va kunlik o'rtacha tushum {d_avg_s:,} so'mni tashkil etdi. "
-                                f"Eng savdoli kassa {top_st.get('stansiya')} bo'lib, uning umumiy tushumdagi ulushi {top_st.get('share_percent')}% ni tashkil qiladi. "
-                                f"Eng yuqori kunlik savdo ko'rsatkichi {peak_day.get('date')} sanasida ({round(peak_day.get('summa', 0)):,} so'm) qayd etilgan."
+            'ai_recommendation': (
+                f"Hurmatli Rahbariyat, {period_name} bo'yicha kiosklar orqali jami {t_sum:,} so'm tushum hamda {t_tix:,} ta chipta sotildi. "
+                f"Bitta chiptaning o'rtacha narxi {avg_p:,} so'mni va kunlik o'rtacha tushum {d_avg_s:,} so'mni tashkil etdi. "
+                f"Eng savdoli kassa {top_st.get('stansiya')} bo'lib, uning umumiy tushumdagi ulushi {top_st.get('share_percent')}% ni tashkil qiladi. "
+                f"Eng yuqori kunlik savdo ko'rsatkichi {peak_day.get('date')} sanasida ({round(peak_day.get('summa', 0)):,} so'm) qayd etilgan."
+            ).replace(',', ' ')
         }
 
     for ym, m_info in monthly_data_map.items():
@@ -897,7 +899,7 @@ def _scope_to_station(scope_dict, region_email):
         'online_percent': 0,
         'terminal_percent': 0,
         'period_name': scope_dict.get('director_summary', {}).get('period_name', ''),
-        'ai_recommendation': f"Sizning kassangiz ({match.get('stansiya')}) bo'yicha jami {summa:,} so'm tushum va {soni:,} ta chipta sotildi."
+        'ai_recommendation': f"Sizning kassangiz ({match.get('stansiya')}) bo'yicha jami {summa:,} so'm tushum va {soni:,} ta chipta sotildi.".replace(',', ' ')
     }
     return scoped
 

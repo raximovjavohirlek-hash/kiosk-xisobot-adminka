@@ -21,9 +21,15 @@ function getShortCurrencyLabel(num) {
     return `(${formatMln(num)})`;
 }
 
+function formatNumberSpaces(num) {
+    if (num === undefined || num === null || isNaN(num)) return "0";
+    const intVal = Math.round(Number(num));
+    return intVal.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+}
+
 function formatCurrency(num, plain = false) {
     if (num === undefined || num === null || isNaN(num)) return "0 so'm";
-    const formatted = Math.round(num).toLocaleString('uz-UZ') + " so'm";
+    const formatted = formatNumberSpaces(num) + " so'm";
     if (plain) return formatted;
     const shortLabel = getShortCurrencyLabel(num);
     return shortLabel ? `${formatted} ${shortLabel}` : formatted;
@@ -325,7 +331,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const avgCheck = st.soni_val > 0 ? Math.round(st.summa_val / st.soni_val) : 0;
         if (modalStSumma) modalStSumma.textContent = formatCurrency(st.summa_val);
         if (modalStShare) modalStShare.textContent = `${st.share_percent}% umumiy ulush`;
-        if (modalStTickets) modalStTickets.textContent = `${st.soni_val.toLocaleString('uz-UZ')} ta`;
+        if (modalStTickets) modalStTickets.textContent = `${formatNumberSpaces(st.soni_val)} ta`;
         
         const summary = statsObj.director_summary || fullBackendStats.director_summary || {};
         const onPct = summary.online_percent || 33.9;
@@ -339,7 +345,7 @@ document.addEventListener('DOMContentLoaded', () => {
             peakDay = dailyList.reduce((max, d) => (d.summa > max.summa ? d : max), dailyList[0]);
         }
         if (modalStPeakDate) modalStPeakDate.textContent = peakDay.summa > 0 ? peakDay.date : 'Yo\'q';
-        if (modalStPeakSum) modalStPeakSum.textContent = peakDay.summa > 0 ? `${Math.round(peakDay.summa).toLocaleString('uz-UZ')} so'm (${peakDay.tickets} ta)` : 'Sotuv bo\'lmagan';
+        if (modalStPeakSum) modalStPeakSum.textContent = peakDay.summa > 0 ? `${formatNumberSpaces(peakDay.summa)} so'm (${formatNumberSpaces(peakDay.tickets)} ta)` : 'Sotuv bo\'lmagan';
         if (modalStTotalDaysCount) modalStTotalDaysCount.textContent = `Jami ${dailyList.length} kunlik ko'rsatkichlar`;
 
         // Render Daily Sales Table Body
@@ -362,9 +368,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     tr.innerHTML = `
                         <td><strong>${day.date}</strong></td>
-                        <td style="text-align: right;"><span class="number-cell-tickets" style="font-size: 12px; padding: 3px 8px;">${day.tickets.toLocaleString('uz-UZ')} ta</span></td>
-                        <td style="text-align: right;"><span class="number-cell-summa" style="font-size: 12px; padding: 3px 8px;">${Math.round(day.summa).toLocaleString('uz-UZ')} so'm</span></td>
-                        <td style="text-align: right;"><span class="number-cell-avg" style="font-size: 12px; padding: 3px 8px;">${Math.round(dayAvgP).toLocaleString('uz-UZ')} so'm</span></td>
+                        <td style="text-align: right;"><span class="number-cell-tickets" style="font-size: 12px; padding: 3px 8px;">${formatNumberSpaces(day.tickets)} ta</span></td>
+                        <td style="text-align: right;"><span class="number-cell-summa" style="font-size: 12px; padding: 3px 8px;">${formatNumberSpaces(day.summa)} so'm</span></td>
+                        <td style="text-align: right;"><span class="number-cell-avg" style="font-size: 12px; padding: 3px 8px;">${formatNumberSpaces(dayAvgP)} so'm</span></td>
                         <td style="text-align: center;">${statusBadge}</td>
                     `;
                     if (isPeak) {
@@ -1040,8 +1046,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td><strong>${ov.ym}</strong></td>
                 <td>${dayBadge}</td>
                 <td>${ov.station_name || ov.email}</td>
-                <td><span class="number-cell-tickets">${ov.override_tickets !== null && ov.override_tickets !== undefined ? ov.override_tickets.toLocaleString('uz-UZ') + ' ta' : 'Asl'}</span></td>
-                <td><span class="number-cell-summa">${ov.override_summa !== null && ov.override_summa !== undefined ? Math.round(ov.override_summa).toLocaleString('uz-UZ') + " so'm" : 'Asl'}</span></td>
+                <td><span class="number-cell-tickets">${ov.override_tickets !== null && ov.override_tickets !== undefined ? formatNumberSpaces(ov.override_tickets) + ' ta' : 'Asl'}</span></td>
+                <td><span class="number-cell-summa">${ov.override_summa !== null && ov.override_summa !== undefined ? formatNumberSpaces(ov.override_summa) + " so'm" : 'Asl'}</span></td>
                 <td style="font-size: 12px; opacity: 0.8;">${ov.updated_at || '-'}</td>
                 <td>
                     <button class="btn-icon-only btn-sm" style="color: var(--accent-rose);" onclick="deleteOverride('${ov.ym}', '${ov.email}', '${ov.day_str || 'ALL'}')" title="Tahrirni bekor qilish">
@@ -1618,7 +1624,7 @@ document.addEventListener('DOMContentLoaded', () => {
             online_percent: onlinePct,
             terminal_percent: terminalPct,
             period_name: periodTitle,
-            ai_recommendation: `Hurmatli Rahbariyat, <strong>${periodTitle}</strong> bo'yicha kiosklar orqali jami <strong>${Math.round(tSum).toLocaleString('uz-UZ')} so'm</strong> tushum hamda <strong>${tTix.toLocaleString('uz-UZ')} ta</strong> chipta sotildi. Bitta chiptaning o'rtacha narxi <strong>${Math.round(avgP).toLocaleString('uz-UZ')} so'mni</strong> va kunlik o'rtacha tushum <strong>${Math.round(dAvgS).toLocaleString('uz-UZ')} so'mni</strong> tashkil etdi. Eng savdoli kassa <strong>${topSt.stansiya}</strong> bo'lib, uning umumiy tushumdagi ulushi <strong>${topSt.share_percent}%</strong> ni tashkil qiladi. Eng yuqori kunlik savdo ko'rsatkichi <strong>${peakDay.date}</strong> sanasida (<strong>${Math.round(peakDay.summa || 0).toLocaleString('uz-UZ')} so'm</strong>) qayd etilgan.`
+            ai_recommendation: `Hurmatli Rahbariyat, <strong>${periodTitle}</strong> bo'yicha kiosklar orqali jami <strong>${formatNumberSpaces(tSum)} so'm</strong> tushum hamda <strong>${formatNumberSpaces(tTix)} ta</strong> chipta sotildi. Bitta chiptaning o'rtacha narxi <strong>${formatNumberSpaces(avgP)} so'mni</strong> va kunlik o'rtacha tushum <strong>${formatNumberSpaces(dAvgS)} so'mni</strong> tashkil etdi. Eng savdoli kassa <strong>${topSt.stansiya}</strong> bo'lib, uning umumiy tushumdagi ulushi <strong>${topSt.share_percent}%</strong> ni tashkil qiladi. Eng yuqori kunlik savdo ko'rsatkichi <strong>${peakDay.date}</strong> sanasida (<strong>${formatNumberSpaces(peakDay.summa || 0)} so'm</strong>) qayd etilgan.`
         };
     }
 
@@ -1747,7 +1753,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Real Executive KPIs
         if (dirKpiNetRevenue) dirKpiNetRevenue.textContent = formatCurrency(summary.net_revenue || stats.total_summa || 0);
-        if (dirKpiTotalTickets) dirKpiTotalTickets.textContent = `${(summary.total_tickets || stats.total_tickets || 0).toLocaleString('uz-UZ')} ta`;
+        if (dirKpiTotalTickets) dirKpiTotalTickets.textContent = `${formatNumberSpaces(summary.total_tickets || stats.total_tickets || 0)} ta`;
 
         // Card 3: Eng Yuqori Savdoli Kassa (har doim summa bo'yicha, sort rejimidan qat'i nazar)
         const revenueSorted = [...(stats.stations || [])].sort((a, b) => b.summa_val - a.summa_val);
@@ -1778,11 +1784,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const terminalPct = ((terminalSum / grandPayTickets) * 100).toFixed(1);
 
         if (dirKpiPaymentRatio) dirKpiPaymentRatio.textContent = `${onlinePct}% / ${terminalPct}%`;
-        if (dirKpiPaymentOnline) dirKpiPaymentOnline.innerHTML = `<i class="fa-solid fa-globe"></i> Online: ${onlineSum.toLocaleString()} ta (${onlinePct}%)`;
+        if (dirKpiPaymentOnline) dirKpiPaymentOnline.innerHTML = `<i class="fa-solid fa-globe"></i> Online: ${formatNumberSpaces(onlineSum)} ta (${onlinePct}%)`;
         if (dirKpiPaymentTerminal) {
-            let termLabel = `Terminal: ${terminalSum.toLocaleString()} ta`;
+            let termLabel = `Terminal: ${formatNumberSpaces(terminalSum)} ta`;
             if (uzcardSum > 0 || humoSum > 0) {
-                termLabel += ` (Uzcard: ${uzcardSum.toLocaleString()}, Humo: ${humoSum.toLocaleString()})`;
+                termLabel += ` (Uzcard: ${formatNumberSpaces(uzcardSum)}, Humo: ${formatNumberSpaces(humoSum)})`;
             }
             dirKpiPaymentTerminal.textContent = termLabel;
         }
@@ -1829,13 +1835,13 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                         </td>
                         <td style="text-align: right;">
-                            <span class="number-cell-tickets">${st.soni_val.toLocaleString('uz-UZ')} ta</span>
+                            <span class="number-cell-tickets">${formatNumberSpaces(st.soni_val)} ta</span>
                         </td>
                         <td style="text-align: right;">
-                            <span class="number-cell-summa">${Math.round(st.summa_val).toLocaleString('uz-UZ')} so'm</span>
+                            <span class="number-cell-summa">${formatNumberSpaces(st.summa_val)} so'm</span>
                         </td>
                         <td style="text-align: right;">
-                            <span class="number-cell-avg">${Math.round(avgP).toLocaleString('uz-UZ')} so'm</span>
+                            <span class="number-cell-avg">${formatNumberSpaces(avgP)} so'm</span>
                         </td>
                         <td>
                             <div class="share-cell">
@@ -1863,13 +1869,13 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                         </td>
                         <td style="text-align: right;">
-                            <span class="number-cell-tickets total">${grandTickets.toLocaleString('uz-UZ')} ta</span>
+                            <span class="number-cell-tickets total">${formatNumberSpaces(grandTickets)} ta</span>
                         </td>
                         <td style="text-align: right;">
-                            <span class="number-cell-summa total">${Math.round(grandSumma).toLocaleString('uz-UZ')} so'm</span>
+                            <span class="number-cell-summa total">${formatNumberSpaces(grandSumma)} so'm</span>
                         </td>
                         <td style="text-align: right;">
-                            <span class="number-cell-avg total">${Math.round(grandAvgP).toLocaleString('uz-UZ')} so'm</span>
+                            <span class="number-cell-avg total">${formatNumberSpaces(grandAvgP)} so'm</span>
                         </td>
                         <td>
                             <div class="share-cell">
@@ -1942,9 +1948,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         callbacks: {
                             label: function(context) {
                                 if (currentSortMode === 'soni') {
-                                    return ` Chiptalar: ${context.raw.toLocaleString('uz-UZ')} ta`;
+                                    return ` Chiptalar: ${formatNumberSpaces(context.raw)} ta`;
                                 }
-                                return ` Tushum: ${context.raw.toLocaleString('uz-UZ')} so'm (${formatMln(context.raw)})`;
+                                return ` Tushum: ${formatNumberSpaces(context.raw)} so'm (${formatMln(context.raw)})`;
                             }
                         }
                     }
@@ -2057,11 +2063,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         logs.forEach((log, idx) => {
             const tr = document.createElement('tr');
-            const totalRows = (log.total_rows || log.rows || 0).toLocaleString();
-            const relRows = log.relevant_rows !== undefined ? log.relevant_rows.toLocaleString() : '-';
-            const newTix = log.new_tickets !== undefined ? log.new_tickets.toLocaleString() : '-';
-            const dupTix = log.duplicate_tickets !== undefined ? log.duplicate_tickets.toLocaleString() : '-';
-            const totSum = (log.total_amount || 0) > 0 ? (Math.round(log.total_amount).toLocaleString() + " so'm") : '-';
+            const totalRows = formatNumberSpaces(log.total_rows || log.rows || 0);
+            const relRows = log.relevant_rows !== undefined ? formatNumberSpaces(log.relevant_rows) : '-';
+            const newTix = log.new_tickets !== undefined ? formatNumberSpaces(log.new_tickets) : '-';
+            const dupTix = log.duplicate_tickets !== undefined ? formatNumberSpaces(log.duplicate_tickets) : '-';
+            const totSum = (log.total_amount || 0) > 0 ? (formatNumberSpaces(log.total_amount) + " so'm") : '-';
             const isSuccess = log.status && log.status.toLowerCase().includes('muvaffaq');
             const statusClass = isSuccess ? 'status-badge' : 'badge badge-rose';
             const statusIcon = isSuccess ? 'fa-check' : 'fa-triangle-exclamation';
@@ -2100,7 +2106,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="st-metrics" style="margin-top: 14px;">
                     <div class="st-metric-item">
                         <span class="st-metric-label">Chiptalar</span>
-                        <span class="st-metric-value" style="color: var(--accent-cyan);">${item.soni_val.toLocaleString()} ta</span>
+                        <span class="st-metric-value" style="color: var(--accent-cyan);">${formatNumberSpaces(item.soni_val)} ta</span>
                     </div>
                     <div class="st-metric-item">
                         <span class="st-metric-label">Tushum Summasi</span>
@@ -2138,15 +2144,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const onlinePct = (onTix / payTotal * 100).toFixed(1);
             const terminalPct = (termTix / payTotal * 100).toFixed(1);
 
-            let tooltipDetail = `Online: ${onTix.toLocaleString()} ta (${(onSum / 1000000).toFixed(1)}M so'm) | Terminal: ${termTix.toLocaleString()} ta (${(termSum / 1000000).toFixed(1)}M so'm)`;
+            let tooltipDetail = `Online: ${formatNumberSpaces(onTix)} ta (${(onSum / 1000000).toFixed(1)}M so'm) | Terminal: ${formatNumberSpaces(termTix)} ta (${(termSum / 1000000).toFixed(1)}M so'm)`;
             if (uzTix > 0 || huTix > 0) {
-                tooltipDetail += ` [Uzcard Terminal: ${uzTix.toLocaleString()} ta | Humo Terminal: ${huTix.toLocaleString()} ta]`;
+                tooltipDetail += ` [Uzcard Terminal: ${formatNumberSpaces(uzTix)} ta | Humo Terminal: ${formatNumberSpaces(huTix)} ta]`;
             }
 
             tr.innerHTML = `
                 <td><strong>${item.date}</strong></td>
-                <td><strong>${item.tickets.toLocaleString('uz-UZ')} ta</strong></td>
-                <td><strong style="color: var(--accent-emerald);">${Math.round(item.summa).toLocaleString('uz-UZ')} so'm</strong></td>
+                <td><strong>${formatNumberSpaces(item.tickets)} ta</strong></td>
+                <td><strong style="color: var(--accent-emerald);">${formatNumberSpaces(item.summa)} so'm</strong></td>
                 <td>
                     <div class="payment-type-cell" title="${tooltipDetail}">
                         <div class="payment-type-track">
@@ -2154,16 +2160,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                         <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11px; margin-top: 4px;">
                             <span style="color: var(--accent-cyan); font-weight: 600;" title="Online: karta raqami va SMS tasdiqlash kodi orqali (Hamkorbank, Payme, Stripe...)">
-                                <i class="fa-solid fa-globe"></i> Online: ${onTix.toLocaleString()} ta (${onlinePct}%)
+                                <i class="fa-solid fa-globe"></i> Online: ${formatNumberSpaces(onTix)} ta (${onlinePct}%)
                             </span>
-                            <span style="color: var(--accent-violet); font-weight: 600;" title="Terminal: Uzcard (${uzTix} ta) + Humo (${huTix} ta)">
-                                <i class="fa-solid fa-credit-card"></i> Terminal: ${termTix.toLocaleString()} ta (${terminalPct}%)
+                            <span style="color: var(--accent-violet); font-weight: 600;" title="Terminal: Uzcard (${formatNumberSpaces(uzTix)} ta) + Humo (${formatNumberSpaces(huTix)} ta)">
+                                <i class="fa-solid fa-credit-card"></i> Terminal: ${formatNumberSpaces(termTix)} ta (${terminalPct}%)
                             </span>
                         </div>
                         ${(uzTix > 0 || huTix > 0) ? `
                         <div style="display: flex; gap: 6px; font-size: 10px; color: var(--text-muted); margin-top: 3px;">
-                            <span style="background: rgba(99, 102, 241, 0.15); color: #818cf8; padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(99, 102, 241, 0.25);" title="Uzcard terminaldan xarid qilingan">Uzcard: ${uzTix.toLocaleString()}</span>
-                            <span style="background: rgba(168, 85, 247, 0.15); color: #c084fc; padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(168, 85, 247, 0.25);" title="Humo terminaldan xarid qilingan (Uzkassa)">Humo: ${huTix.toLocaleString()}</span>
+                            <span style="background: rgba(99, 102, 241, 0.15); color: #818cf8; padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(99, 102, 241, 0.25);" title="Uzcard terminaldan xarid qilingan">Uzcard: ${formatNumberSpaces(uzTix)}</span>
+                            <span style="background: rgba(168, 85, 247, 0.15); color: #c084fc; padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(168, 85, 247, 0.25);" title="Humo terminaldan xarid qilingan (Uzkassa)">Humo: ${formatNumberSpaces(huTix)}</span>
                         </div>` : ''}
                     </div>
                 </td>
@@ -2196,7 +2202,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const ticketDiff = targetData.total_tickets - baseData.total_tickets;
         const ticketPct = baseData.total_tickets > 0 ? ((ticketDiff / baseData.total_tickets) * 100).toFixed(1) : 0;
 
-        if (momTicketGrowth) momTicketGrowth.textContent = `${ticketDiff >= 0 ? '+' : ''}${ticketDiff.toLocaleString('uz-UZ')} ta`;
+        if (momTicketGrowth) momTicketGrowth.textContent = `${ticketDiff >= 0 ? '+' : ''}${formatNumberSpaces(ticketDiff)} ta`;
         if (momTicketBadge) {
             momTicketBadge.className = ticketDiff >= 0 ? 'kpi-badge positive' : 'kpi-badge negative';
             momTicketBadge.innerHTML = `<i class="fa-solid fa-arrow-trend-${ticketDiff >= 0 ? 'up' : 'down'}"></i> ${ticketPct}%`;
@@ -2227,7 +2233,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const targetMonthName = compTargetMonth ? compTargetMonth.options[compTargetMonth.selectedIndex].text : '';
 
             let trendText = revDiff >= 0 
-                ? `tushum summasi <strong>+${(revDiff / 1000000).toFixed(1)} mln so'mga (+${revPct}%)</strong> hamda sotilgan chiptalar <strong>+${ticketDiff.toLocaleString()} taga (+${ticketPct}%)</strong> oshgan.`
+                ? `tushum summasi <strong>+${(revDiff / 1000000).toFixed(1)} mln so'mga (+${revPct}%)</strong> hamda sotilgan chiptalar <strong>+${formatNumberSpaces(ticketDiff)} taga (+${ticketPct}%)\u003c/strong\u003e oshgan.`
                 : `tushum summasi <strong>${(revDiff / 1000000).toFixed(1)} mln so'mga (${revPct}%)</strong> kamaygan.`;
 
             executiveSummaryText.innerHTML = `${baseMonthName} oyiga nisbatan ${targetMonthName} oyida kiosklar bo'yicha umumiy ${trendText} Eng yuqori o'sish <strong>${topGrowingSt}</strong> kassasida kuzatildi.`;
@@ -2257,9 +2263,9 @@ document.addEventListener('DOMContentLoaded', () => {
             tr.innerHTML = `
                 <td><strong>${idx + 1}</strong></td>
                 <td><i class="fa-solid fa-location-dot" style="color: var(--accent-cyan); margin-right: 6px;"></i> <strong>${s.stansiya}</strong></td>
-                <td>${Math.round(baseSum).toLocaleString('uz-UZ')} so'm</td>
-                <td><strong style="color: var(--accent-emerald);">${Math.round(s.summa_val).toLocaleString('uz-UZ')} so'm</strong></td>
-                <td><strong style="color: ${isPos ? 'var(--accent-emerald)' : 'var(--accent-rose)'};">${isPos ? '+' : ''}${Math.round(diffSum).toLocaleString('uz-UZ')} so'm</strong></td>
+                <td>${formatNumberSpaces(baseSum)} so'm</td>
+                <td><strong style="color: var(--accent-emerald);">${formatNumberSpaces(s.summa_val)} so'm</strong></td>
+                <td><strong style="color: ${isPos ? 'var(--accent-emerald)' : 'var(--accent-rose)'};">${isPos ? '+' : ''}${formatNumberSpaces(diffSum)} so'm</strong></td>
                 <td><span class="kpi-badge ${isPos ? 'positive' : 'negative'}"><i class="fa-solid fa-arrow-trend-${isPos ? 'up' : 'down'}"></i> ${isPos ? '+' : ''}${diffPct}%</span></td>
             `;
             comparisonTableBody.appendChild(tr);
@@ -2323,7 +2329,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     tooltip: {
                         callbacks: {
                             label: function(context) {
-                                return ` ${context.dataset.label}: ${Math.round(context.raw).toLocaleString('uz-UZ')} so'm`;
+                                return ` ${context.dataset.label}: ${formatNumberSpaces(context.raw)} so'm`;
                             }
                         }
                     }
@@ -2400,7 +2406,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         padding: 12,
                         callbacks: {
                             label: function(context) {
-                                return ' Sotilgan: ' + context.raw.toLocaleString('uz-UZ') + ' ta chipta';
+                                return ' Sotilgan: ' + formatNumberSpaces(context.raw) + ' ta chipta';
                             }
                         }
                     }
