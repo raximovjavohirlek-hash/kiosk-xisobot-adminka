@@ -1,0 +1,77 @@
+{
+  "toshkent.shimoliykiosk@railway.uz": {
+    "station": "Тошкент Марказий",
+    "col_soni": 30,
+    "col_summa": 31
+  },
+  "kiosk@axonlogic.uz": {
+    "station": "Тошкент Жанубий",
+    "col_soni": 10,
+    "col_summa": 11
+  },
+  "samarqandkiosk@railway.uz": {
+    "station": "Самарқанд",
+    "col_soni": 26,
+    "col_summa": 27
+  },
+  "urganchkiosk@railway.uz": {
+    "station": "Урганч",
+    "col_soni": 32,
+    "col_summa": 33
+  },
+  "khivakiosk@railway.uz": {
+    "station": "Хива",
+    "col_soni": 8,
+    "col_summa": 9
+  },
+  "navoiykiosk@railway.uz": {
+    "station": "Навои",
+    "col_soni": 14,
+    "col_summa": 15
+  },
+  "buxorokiosk@railway.uz": {
+    "station": "Бухоро",
+    "col_soni": 6,
+    "col_summa": 7
+  },
+  "qongirotkiosk@railway.uz": {
+    "station": "Қўнғирод",
+    "col_soni": 22,
+    "col_summa": 23
+  },
+  "nukuskiosk@railway.uz": {
+    "station": "Нукус",
+    "col_soni": 18,
+    "col_summa": 19
+  },
+  "andijonkiosk@railway.uz": {
+    "station": "Андижон",
+    "col_soni": 4,
+    "col_summa": 5
+  },
+  "qoqonkiosk@railway.uz": {
+    "station": "Қўқон",
+    "col_soni": 24,
+    "col_summa": 25
+  },
+  "margilonkiosk@railway.uz": {
+    "station": "Марғилон",
+    "col_soni": 12,
+    "col_summa": 13
+  },
+  "namangankiosk@railway.uz": {
+    "station": "Наманган",
+    "col_soni": 16,
+    "col_summa": 17
+  },
+  "termizkiosk@railway.uz": {
+    "station": "Термиз",
+    "col_soni": 28,
+    "col_summa": 29
+  },
+  "qarshikiosk@railway.uz": {
+    "station": "Қарши",
+    "col_soni": 20,
+    "col_summa": 21
+  }
+}

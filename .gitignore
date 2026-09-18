@@ -18,3 +18,14 @@ kiosk_upload_logs.json
 !backend/users.json
 *.xlsx
 !backend/excellar/**
+
+# Backups & SQLite runtime files
+backend/backups/
+backups/
+*.backup.db
+kiosk_data_backup_*.db
+*.db-wal
+*.db-shm
+*.temp_restore_upload
+
+

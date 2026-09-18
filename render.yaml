@@ -22,6 +22,9 @@ services:
         generateValue: true
       - key: ALLOWED_ORIGINS
         value: https://kiosk-xisobot-adminka.pages.dev,https://kiosk-hisobot.pages.dev
-      # Uncomment when disk is mounted:
+      # Persistent Disk Environment Variables (Uncomment when disk is mounted):
       # - key: DATA_DIR
       #   value: /var/data
+      # - key: DATABASE_PATH
+      #   value: /var/data/kiosk_data.db
+

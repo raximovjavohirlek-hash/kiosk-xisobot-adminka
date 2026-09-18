@@ -7,9 +7,26 @@ import io
 import pandas as pd
 import openpyxl
 
-def get_db_connection(db_path):
-    conn = sqlite3.connect(db_path)
+from datetime import datetime
+
+def get_db_connection(db_path, timeout=30.0):
+    """
+    Returns a configured SQLite connection with:
+    - 30-second busy timeout (prevents database is locked errors under concurrent load)
+    - WAL journal mode (concurrent non-blocking reads during writes)
+    - NORMAL synchronous (optimal write speed with ACID safety in WAL mode)
+    - Foreign keys enabled
+    - Row factory enabled for dictionary-like column access
+    """
+    conn = sqlite3.connect(db_path, timeout=timeout)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode = WAL;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
+        conn.execute("PRAGMA busy_timeout = 30000;")
+        conn.execute("PRAGMA foreign_keys = ON;")
+    except Exception as _pragma_err:
+        pass
     return conn
 
 def resolve_payment_info(raw_val):
@@ -210,14 +227,7 @@ def init_db(db_path):
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_tickets_user ON tickets(user_email)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_tickets_station ON tickets(station_name)')
 
-    # 6. Station Manual Overrides Table
-    try:
-        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='station_overrides'")
-        t_info = cursor.fetchone()
-        if t_info and 'PRIMARYKEY(ym,day_str,email)' not in str(t_info[0]).replace(' ', ''):
-            cursor.execute("DROP TABLE IF EXISTS station_overrides")
-    except Exception as e:
-        pass
+    # 6. Station Manual Overrides Table (Safe idempotent creation without dropping)
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS station_overrides (
@@ -1258,7 +1268,251 @@ def migrate_payment_methods(db_path, email_map=None):
     finally:
         conn.close()
 
-    # Rebuild aggregates so daily_stats & monthly_summaries reflect the updated classifications
-    rebuild_aggregates_from_tickets(db_path, email_map)
+    # Rebuild aggregates ONLY if tickets were actually updated
+    if migrated_count > 0:
+        rebuild_aggregates_from_tickets(db_path, email_map)
     return {'status': 'success', 'migrated_count': migrated_count}
+
+
+def create_database_backup(db_path, backup_dir=None):
+    """
+    Creates an online, non-blocking, consistent snapshot of the SQLite database
+    using SQLite's native backup API.
+    Returns the absolute path to the backup file.
+    """
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"Database not found: {db_path}")
+
+    if not backup_dir:
+        backup_dir = os.path.join(os.path.dirname(os.path.abspath(db_path)), 'backups')
+    os.makedirs(backup_dir, exist_ok=True)
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    backup_filename = f"kiosk_data_backup_{timestamp}.db"
+    backup_path = os.path.join(backup_dir, backup_filename)
+
+    src_conn = sqlite3.connect(db_path, timeout=30.0)
+    dst_conn = sqlite3.connect(backup_path)
+    try:
+        src_conn.backup(dst_conn)
+    finally:
+        dst_conn.close()
+        src_conn.close()
+
+    # Validate backup integrity
+    verify_conn = sqlite3.connect(backup_path)
+    try:
+        c = verify_conn.cursor()
+        c.execute("PRAGMA integrity_check;")
+        res = c.fetchone()
+        if not res or res[0] != 'ok':
+            raise RuntimeError(f"Backup integrity verification failed: {res}")
+    finally:
+        verify_conn.close()
+
+    return backup_path
+
+
+def get_database_health(db_path):
+    """
+    Read-only diagnostic inspection of the SQLite database.
+    Does NOT modify any data.
+    """
+    if not os.path.exists(db_path):
+        return {
+            'database_path': db_path,
+            'exists': False,
+            'status': 'error',
+            'error': 'Database file does not exist'
+        }
+
+    size_bytes = os.path.getsize(db_path)
+    size_mb = round(size_bytes / (1024 * 1024), 2)
+
+    conn = get_db_connection(db_path, timeout=10.0)
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("PRAGMA integrity_check;")
+        integrity_row = cursor.fetchone()
+        integrity_status = integrity_row[0] if integrity_row else 'unknown'
+
+        cursor.execute("PRAGMA journal_mode;")
+        journal_mode = cursor.fetchone()[0]
+
+        cursor.execute("PRAGMA foreign_keys;")
+        foreign_keys = bool(cursor.fetchone()[0])
+
+        cursor.execute("PRAGMA synchronous;")
+        sync_mode = cursor.fetchone()[0]
+
+        cursor.execute("SELECT sqlite_version();")
+        sqlite_version = cursor.fetchone()[0]
+
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+        tables = [r[0] for r in cursor.fetchall()]
+
+        table_counts = {}
+        for t in tables:
+            cursor.execute(f"SELECT COUNT(*) FROM {t};")
+            table_counts[t] = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(DISTINCT ticket_number), COUNT(*) FROM tickets;")
+        t_row = cursor.fetchone()
+        distinct_tickets = t_row[0] if t_row else 0
+        total_tickets = t_row[1] if t_row else 0
+
+        cursor.execute("SELECT MAX(uploaded_at) FROM tickets;")
+        last_upload_row = cursor.fetchone()
+        last_uploaded_at = last_upload_row[0] if last_upload_row else None
+
+        cursor.execute("SELECT ym, total_tickets, total_summa FROM monthly_summaries ORDER BY ym DESC;")
+        month_breakdown = [dict(r) for r in cursor.fetchall()]
+
+        return {
+            'database_path': os.path.abspath(db_path),
+            'exists': True,
+            'size_bytes': size_bytes,
+            'size_mb': size_mb,
+            'sqlite_version': sqlite_version,
+            'journal_mode': journal_mode,
+            'foreign_keys': foreign_keys,
+            'synchronous': sync_mode,
+            'integrity_status': integrity_status,
+            'table_counts': table_counts,
+            'tickets_count': total_tickets,
+            'distinct_tickets_count': distinct_tickets,
+            'has_ticket_duplicates': distinct_tickets != total_tickets,
+            'overrides_count': table_counts.get('station_overrides', 0),
+            'last_uploaded_at': last_uploaded_at,
+            'monthly_summaries': month_breakdown,
+            'status': 'healthy' if integrity_status == 'ok' else 'warning'
+        }
+    except Exception as err:
+        return {
+            'database_path': os.path.abspath(db_path),
+            'exists': True,
+            'status': 'error',
+            'error': str(err)
+        }
+    finally:
+        conn.close()
+
+
+def get_database_consistency_report(db_path, email_map=None):
+    """
+    Comprehensive read-only data consistency audit.
+    Checks for:
+    - duplicate ticket numbers
+    - NULL or empty critical values
+    - negative amounts
+    - tickets without known kiosk mapping
+    - monthly aggregate consistency
+    - distribution of payment types
+    Does NOT delete or modify any records.
+    """
+    if not os.path.exists(db_path):
+        return {'status': 'error', 'message': 'Database not found'}
+
+    conn = get_db_connection(db_path, timeout=10.0)
+    cursor = conn.cursor()
+
+    try:
+        # 1. Duplicate tickets check
+        cursor.execute('''
+            SELECT ticket_number, COUNT(*) as cnt
+            FROM tickets
+            GROUP BY ticket_number
+            HAVING cnt > 1
+        ''')
+        duplicates = [dict(r) for r in cursor.fetchall()]
+
+        # 2. Critical empty / NULL values check
+        cursor.execute("SELECT COUNT(*) FROM tickets WHERE ticket_number IS NULL OR TRIM(ticket_number) = '';")
+        empty_tickets = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM tickets WHERE date_str IS NULL OR TRIM(date_str) = '';")
+        empty_dates = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM tickets WHERE ym IS NULL OR TRIM(ym) = '';")
+        empty_ym = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM tickets WHERE user_email IS NULL OR TRIM(user_email) = '';")
+        empty_emails = cursor.fetchone()[0]
+
+        # 3. Negative amounts
+        cursor.execute("SELECT COUNT(*) FROM tickets WHERE summa < 0;")
+        negative_summa = cursor.fetchone()[0]
+
+        # 4. Unknown kiosk accounts
+        allowed_emails = [k.strip().lower() for k in email_map.keys()] if email_map else []
+        if allowed_emails:
+            placeholders = ','.join('?' * len(allowed_emails))
+            cursor.execute(f'''
+                SELECT COUNT(*) FROM tickets
+                WHERE LOWER(TRIM(user_email)) NOT IN ({placeholders})
+                AND user_email IS NOT NULL AND TRIM(user_email) != ''
+            ''', allowed_emails)
+            unmapped_emails_count = cursor.fetchone()[0]
+        else:
+            unmapped_emails_count = 0
+
+        # 5. Payment distribution
+        cursor.execute('''
+            SELECT payment_type, payment_method, COUNT(*) as count, SUM(summa) as total_summa
+            FROM tickets
+            GROUP BY payment_type, payment_method
+            ORDER BY count DESC
+        ''')
+        payment_distribution = [dict(r) for r in cursor.fetchall()]
+
+        # 6. Aggregate check
+        cursor.execute('''
+            SELECT t.ym,
+                   COUNT(t.ticket_number) as raw_tickets,
+                   ROUND(SUM(t.summa)) as raw_summa,
+                   COALESCE(m.total_tickets, 0) as summary_tickets,
+                   COALESCE(m.total_summa, 0) as summary_summa
+            FROM tickets t
+            LEFT JOIN monthly_summaries m ON t.ym = m.ym
+            WHERE t.ym IS NOT NULL AND t.ym != ''
+            GROUP BY t.ym
+            ORDER BY t.ym ASC
+        ''')
+        monthly_audit = [dict(r) for r in cursor.fetchall()]
+
+        cursor.execute("SELECT * FROM station_overrides;")
+        active_overrides = [dict(r) for r in cursor.fetchall()]
+
+        issues_detected = []
+        if duplicates:
+            issues_detected.append(f"{len(duplicates)} ta dublikat ticket_number aniqlandi")
+        if empty_tickets > 0:
+            issues_detected.append(f"{empty_tickets} ta bo'sh ticket_number aniqlandi")
+        if negative_summa > 0:
+            issues_detected.append(f"{negative_summa} ta manfiy summa aniqlandi")
+        if empty_ym > 0:
+            issues_detected.append(f"{empty_ym} ta oy (ym) ko'rsatilmagan chiptalar mavjud (eski yuklash qoldiqlari)")
+
+        return {
+            'status': 'success',
+            'is_consistent': len(duplicates) == 0 and empty_tickets == 0 and negative_summa == 0,
+            'duplicate_tickets_count': len(duplicates),
+            'empty_ticket_numbers_count': empty_tickets,
+            'empty_dates_count': empty_dates,
+            'empty_ym_count': empty_ym,
+            'empty_emails_count': empty_emails,
+            'negative_amounts_count': negative_summa,
+            'unmapped_emails_count': unmapped_emails_count,
+            'active_overrides_count': len(active_overrides),
+            'active_overrides': active_overrides,
+            'payment_distribution': payment_distribution,
+            'monthly_audit': monthly_audit,
+            'issues_detected': issues_detected
+        }
+    except Exception as e:
+        return {'status': 'error', 'message': f"Consistency check error: {str(e)}"}
+    finally:
+        conn.close()
+
 

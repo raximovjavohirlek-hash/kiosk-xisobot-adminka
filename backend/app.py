@@ -18,6 +18,8 @@ import os
 import sys
 import json
 import time
+import shutil
+import sqlite3
 import webbrowser
 import threading
 import io
@@ -61,6 +63,24 @@ if DATA_DIR:
                 print(f"[Persistent Storage] Could not copy seed {seed_fname}:", e_seed)
 else:
     app.config['UPLOAD_FOLDER'] = BUNDLE_DIR
+
+def get_database_path():
+    """
+    Resolves the active SQLite database path.
+    Precedence:
+    1. DATABASE_PATH environment variable (explicit production path)
+    2. DATA_DIR environment variable (persistent disk mount, e.g. /var/data/kiosk_data.db)
+    3. app.config['UPLOAD_FOLDER'] / 'kiosk_data.db' (default fallback)
+    """
+    db_env = os.environ.get('DATABASE_PATH')
+    if db_env:
+        return os.path.abspath(db_env)
+    data_dir = os.environ.get('DATA_DIR')
+    if data_dir:
+        return os.path.abspath(os.path.join(data_dir, 'kiosk_data.db'))
+    upload_folder = app.config.get('UPLOAD_FOLDER', BUNDLE_DIR)
+    return os.path.abspath(os.path.join(upload_folder, 'kiosk_data.db'))
+
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB limit
 app.config['ADMIN_PASSWORD'] = os.environ.get('ADMIN_PASSWORD', 'Javo!QAZ')
 
@@ -313,6 +333,11 @@ def load_mappings():
                 return json.load(f)
         except Exception:
             pass
+    # Persist default mappings to file so configuration is file-backed and manageable
+    try:
+        save_mappings(DEFAULT_EMAIL_MAP)
+    except Exception:
+        pass
     return DEFAULT_EMAIL_MAP
 
 def save_mappings(mappings):
@@ -742,7 +767,7 @@ def process_excel(data_path, report_path, uploaded_path=None):
         'year': latest_year
     }
 
-    db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+    db_path = get_database_path()
     try:
         from database import save_monthly_report_to_db
         for ym_code, m_stats in monthly_data.items():
@@ -954,7 +979,7 @@ def get_stats():
     if STATS_CACHE is not None:
         stats = STATS_CACHE
     else:
-        db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+        db_path = get_database_path()
         email_map = load_mappings()
         try:
             from database import get_all_stats_from_db
@@ -1020,7 +1045,7 @@ def upload_file():
         report_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Август кисока.xlsx')
         data_path = os.path.join(app.config['UPLOAD_FOLDER'], 'data.xlsx')
 
-        db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+        db_path = get_database_path()
         email_map = load_mappings()
 
         fn_lower = filename.lower()
@@ -1043,7 +1068,7 @@ def upload_file():
         parse_result = smart_parse_and_save_excel(db_path, file_bytes, orig_filename, email_map)
         
         if parse_result.get('status') == 'error' and not is_rep:
-            add_upload_log(orig_filename, 0, f"Xatolik: {parse_result.get('message')}")
+            add_upload_log(orig_filename, total_rows=0, status="Xatolik", error_message=str(parse_result.get('message') or ''))
             return jsonify({'status': 'error', 'message': parse_result.get('message')}), 400
 
         invalidate_stats_cache()
@@ -1124,7 +1149,7 @@ def sync_tickets():
         if not isinstance(ticket_list, list):
             return jsonify({'status': 'error', 'message': "Chiptalar formati massiv (array) bo'lishi shart"}), 400
 
-        db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+        db_path = get_database_path()
         email_map = load_mappings()
 
         from database import sync_json_tickets_to_db
@@ -1151,7 +1176,7 @@ def sync_tickets():
 @app.route('/api/tickets', methods=['GET'])
 @require_auth()
 def get_tickets():
-    db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+    db_path = get_database_path()
     try:
         from database import get_paginated_tickets_from_db
         page = int(request.args.get('page', 1))
@@ -1171,7 +1196,7 @@ def get_tickets():
 @require_auth()
 def download():
     raw_period = (request.args.get('period') or request.args.get('ym') or 'all').strip()
-    db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+    db_path = get_database_path()
     email_map = load_mappings()
     region = get_auth_region()
 
@@ -1520,7 +1545,7 @@ def export_station_excel(station_name):
         stats = None
         m_code_str = requested_month or '2026-08'
 
-        db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+        db_path = get_database_path()
         email_map = load_mappings()
         try:
             from database import get_all_stats_from_db
@@ -1942,7 +1967,7 @@ def override_station_stats():
         if tickets is None and summa is None:
             return jsonify({'success': False, 'error': "Chiptalar soni yoki summa kiritilishi shart!"}), 400
 
-        db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+        db_path = get_database_path()
         email_map = load_mappings()
 
         from database import save_station_override, get_all_stats_from_db
@@ -1977,7 +2002,7 @@ def override_station_stats():
 @app.route('/api/admin/overrides', methods=['GET', 'DELETE'])
 @require_auth(role='admin')
 def handle_overrides():
-    db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+    db_path = get_database_path()
     email_map = load_mappings()
     from database import get_station_overrides, delete_station_override, get_all_stats_from_db
 
@@ -2066,14 +2091,20 @@ def start_self_ping():
 @app.route('/api/admin/backup-db', methods=['GET'])
 @require_auth(role='admin')
 def backup_db():
-    db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+    db_path = get_database_path()
     if not os.path.exists(db_path):
         return jsonify({'error': 'Baza topilmadi'}), 404
-    return send_file(
-        db_path,
-        as_attachment=True,
-        download_name=f'kiosk_data_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.db'
-    )
+    try:
+        from database import create_database_backup
+        backup_file = create_database_backup(db_path)
+        add_audit_log('db_backup_created', request.auth_user.get('username', 'admin'), detail=os.path.basename(backup_file))
+        return send_file(
+            backup_file,
+            as_attachment=True,
+            download_name=os.path.basename(backup_file)
+        )
+    except Exception as e:
+        return jsonify({'error': f"Zaxira nusxa yaratishda xatolik: {str(e)}"}), 500
 
 @app.route('/api/admin/restore-db', methods=['POST'])
 @require_auth(role='admin')
@@ -2082,17 +2113,88 @@ def restore_db():
         return jsonify({'error': 'Fayl tanlanmagan'}), 400
     file = request.files['file']
     if not file.filename.endswith('.db'):
-        return jsonify({'error': 'Faqat .db formatdagi fayllar qabul qilinadi'}), 400
+        return jsonify({'error': "Faqat .db formatdagi SQLite fayllar qabul qilinadi"}), 400
     
-    db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
-    file.save(db_path)
-    invalidate_stats_cache()
-    warmup_stats_cache()
-    return jsonify({'success': True, 'message': 'Ma\'lumotlar bazasi muvaffaqiyatli tiklandi!'})
+    db_path = get_database_path()
+    temp_path = db_path + '.temp_restore_upload'
+    
+    try:
+        file.save(temp_path)
+        
+        # 1. Pre-validation: verify SQLite header and integrity on the uploaded temp file
+        try:
+            verify_conn = sqlite3.connect(temp_path, timeout=10.0)
+            v_cur = verify_conn.cursor()
+            v_cur.execute("PRAGMA integrity_check;")
+            res = v_cur.fetchone()
+            if not res or res[0] != 'ok':
+                verify_conn.close()
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                return jsonify({'error': f"Yuklangan fayl SQLite ma'lumotlar bazasi emas yoki shikastlangan: {res}"}), 400
+
+            # Verify required tables exist
+            v_cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            existing_tables = {r[0] for r in v_cur.fetchall()}
+            required_tables = {'tickets', 'monthly_summaries', 'daily_stats'}
+            missing = required_tables - existing_tables
+            verify_conn.close()
+            if missing:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                return jsonify({'error': f"Yuklangan bazada muhim jadvallar topilmadi: {', '.join(missing)}"}), 400
+        except Exception as val_err:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
+            return jsonify({'error': f"Yuklangan fayl SQLite ma'lumotlar bazasi emas yoki shikastlangan: {str(val_err)}"}), 400
+        
+        # 2. Automated Safety Backup of the live database before replacing it
+        if os.path.exists(db_path):
+            from database import create_database_backup
+            pre_restore_backup = create_database_backup(db_path)
+            add_audit_log('db_pre_restore_backup', request.auth_user.get('username', 'admin'), detail=os.path.basename(pre_restore_backup))
+        
+        # 3. Atomic replacement
+        if os.path.exists(db_path):
+            os.replace(temp_path, db_path)
+        else:
+            shutil.move(temp_path, db_path)
+            
+        invalidate_stats_cache()
+        warmup_stats_cache()
+        add_audit_log('db_restore', request.auth_user.get('username', 'admin'), detail=file.filename)
+        return jsonify({'success': True, 'message': "Ma'lumotlar bazasi xavfsiz tarzda tiklandi!"})
+    except Exception as e:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+        return jsonify({'error': f"Bazani tiklashda xatolik: {str(e)}"}), 500
+
+@app.route('/api/admin/db-health', methods=['GET'])
+@require_auth(role='admin')
+def admin_db_health():
+    from database import get_database_health
+    db_path = get_database_path()
+    health = get_database_health(db_path)
+    return jsonify({'success': True, 'health': health}), 200
+
+@app.route('/api/admin/db-consistency', methods=['GET'])
+@require_auth(role='admin')
+def admin_db_consistency():
+    from database import get_database_consistency_report
+    db_path = get_database_path()
+    email_map = load_mappings()
+    report = get_database_consistency_report(db_path, email_map)
+    return jsonify({'success': True, 'consistency_report': report}), 200
 
 def warmup_stats_cache():
     try:
-        db_path = os.path.join(app.config['UPLOAD_FOLDER'], 'kiosk_data.db')
+        db_path = get_database_path()
         from database import init_db, save_monthly_report_to_db, get_all_stats_from_db, migrate_payment_methods
         init_db(db_path)
         

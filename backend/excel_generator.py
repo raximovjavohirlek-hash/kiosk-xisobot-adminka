@@ -86,8 +86,12 @@ def generate_kiosk_excel_report(db_path, period='latest', region=None, email_map
 
     wb = openpyxl.load_workbook(template_path)
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    try:
+        from database import get_db_connection
+        conn = get_db_connection(db_path, timeout=30.0)
+    except Exception:
+        conn = sqlite3.connect(db_path, timeout=30.0)
+        conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
     # Determine target month & year

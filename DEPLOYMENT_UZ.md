@@ -121,6 +121,46 @@ Backend ilovasiga maxsus eng yengil va tezkor Ping API lari kiritilgan:
 
 ---
 
+## 5. Ma'lumotlar Bazasi Xavfsizligi, Persistent Storage va Zaxiralash (Database Safety)
+
+Tizim relyatsion **SQLite (WAL mode)** ma'lumotlar bazasida 6,600+ real chipta tranzaksiyalarini saqlaydi. Har bir yuklash va o'zgarishda ma'lumotlar yo'qolmasligi uchun quyidagi xavfsizlik choralari joriy etilgan:
+
+### A. Ishlab Chiqarish (Production) Persistent Disk Sozlamasi
+Render.com da server qayta yuklanganda (redeploy) yangi yuklangan chiptalar yo'qolib ketmasligi uchun **Persistent Disk** ulash tavsiya etiladi:
+1. Render dashboardda **Disks** -> **Add Disk** bo'limiga kiring:
+   - **Name**: `kiosk-data`
+   - **Mount Path**: `/var/data`
+   - **Size**: `1 GB` (yoki ko'proq)
+2. **Environment Variables** ga quyidagini qo'shing:
+   - `DATA_DIR`: `/var/data`
+   - (Yoki `DATABASE_PATH`: `/var/data/kiosk_data.db`)
+3. Tizim birinchi startda mavjud bazani xavfsiz ko'chirib oladi va keyingi barcha o'zgarishlarni bevosita diskda saqlaydi.
+
+### B. DevOps CLI Buyruqlari (`backend/db_manager.py`)
+Administrator yoki dasturchi terminal orqali bazani to'liq nazorat qilishi mumkin:
+```bash
+# 1. Baza salomatligi va statistikasi (Read-only):
+python backend/db_manager.py health
+
+# 2. Baza yaxlitligi va anomaliyalarni audit qilish (Read-only):
+python backend/db_manager.py consistency
+
+# 3. Onlayn xavfsiz zaxira nusxa (Backup) olish:
+python backend/db_manager.py backup
+
+# 4. Tezkor tekshiruv (Integrity va Row counts assertions):
+python backend/db_manager.py verify
+```
+
+### C. Admin Web API Diagnostika va Zaxiralash
+- `GET /api/admin/backup-db` — Bazaning onlayn snapshot zaxirasini yuklab olish.
+- `POST /api/admin/restore-db` — Bazani xavfsiz tiklash (avval fayl tekshiriladi, joriy bazaning zaxirasi olinadi va shundan so'ng tiklanadi).
+- `GET /api/admin/db-health` — Baza salomatligi va texnik parametrlarini ko'rish.
+- `GET /api/admin/db-consistency` — Ma'lumotlar mosligi hisoboti.
+
+
+---
+
 ## 5. Mahalliy (Local) kompyuterda ishga tushirish
 
 Mahalliy kompyuterda sinash uchun:
