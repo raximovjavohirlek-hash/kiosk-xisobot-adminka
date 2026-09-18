@@ -621,40 +621,73 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password })
             })
-            .then(res => {
-                if (!res.ok && res.status >= 500) {
-                    throw new Error("Server vaqtincha javob bermayapti. Render bepul serveri uyg'onayotgan bo'lishi mumkin, 15-20 soniya kuting.");
-                }
-                return res.json();
-            })
-            .then(data => {
-                if (data.success && data.token) {
-                    localStorage.setItem('auth_token', data.token);
-                    localStorage.setItem('auth_user', JSON.stringify(data.user));
-                    sessionStorage.setItem('kiosk-admin-auth', 'true');
-                    sessionStorage.setItem('kiosk-admin-token', data.token);
-
-                    if (systemLoginGateModal) systemLoginGateModal.style.display = 'none';
-                    if (systemLoginError) systemLoginError.style.display = 'none';
-                    const appContainer = document.getElementById('appContainer');
-                    if (appContainer) appContainer.style.display = 'block';
-
-                    showToast('success', 'Xush Kelibsiz!', data.message || 'Tizimga kirdingiz');
-                    checkAppAuthentication();
-                } else {
-                    if (systemLoginError) {
-                        systemLoginError.textContent = data.error || "Login yoki parol noto'g'ri!";
-                        systemLoginError.style.display = 'block';
+            .then(async res => {
+                let data = null;
+                const contentType = res.headers.get('content-type') || '';
+                if (contentType.includes('application/json')) {
+                    try {
+                        data = await res.json();
+                    } catch (e) {
+                        data = null;
                     }
                 }
+
+                if (res.ok && data && data.success && data.token) {
+                    return data;
+                }
+
+                if (data && (data.error || data.message)) {
+                    const err = new Error(data.error || data.message);
+                    err.status = res.status;
+                    throw err;
+                }
+
+                const err = new Error();
+                err.status = res.status;
+                if (res.status === 401) {
+                    err.message = "Login yoki parol noto'g'ri!";
+                } else if (res.status === 403) {
+                    err.message = "Hisobingiz bloklangan yoki kirish huquqiga ega emassiz!";
+                } else if (res.status === 404) {
+                    err.message = "API serverida auth yo'li topilmadi (404 Not Found).";
+                } else if (res.status === 429) {
+                    err.message = "Juda ko'p xato urinishlar qilindi. Iltimos, birozdan so'ng qayta urinib ko'ring.";
+                } else if (res.status === 503) {
+                    err.message = "Server vaqtincha to'xtatilgan (503 Service Suspended). Render Dashboard orqali serverni yoqing (Resume).";
+                } else if (res.status >= 500) {
+                    err.message = `Serverda ichki xatolik yuz berdi (HTTP ${res.status}). Server uyg'onayotgan yoki qayta yuklanayotgan bo'lishi mumkin.`;
+                } else {
+                    err.message = `Avtorizatsiyada xatolik yuz berdi (HTTP ${res.status})`;
+                }
+                throw err;
+            })
+            .then(data => {
+                localStorage.setItem('auth_token', data.token);
+                localStorage.setItem('auth_user', JSON.stringify(data.user));
+                sessionStorage.setItem('kiosk-admin-auth', 'true');
+                sessionStorage.setItem('kiosk-admin-token', data.token);
+
+                if (systemLoginGateModal) systemLoginGateModal.style.display = 'none';
+                if (systemLoginError) systemLoginError.style.display = 'none';
+                const appContainer = document.getElementById('appContainer');
+                if (appContainer) appContainer.style.display = 'block';
+
+                showToast('success', 'Xush Kelibsiz!', data.message || 'Tizimga kirdingiz');
+                checkAppAuthentication();
             })
             .catch(err => {
                 if (systemLoginError) {
                     const msg = String(err && err.message ? err.message : err);
-                    if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
-                        systemLoginError.textContent = "Server uyg'onmoqda (Render free tier). Iltimos, 15-20 soniya kutib qayta 'Kirish' tugmasini bosing.";
+                    if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('Load failed')) {
+                        systemLoginError.innerHTML = `
+                            <div style="line-height: 1.5;">
+                                <strong><i class="fa-solid fa-triangle-exclamation"></i> Serverga ulanib bo'lmadi (CORS / Tarmoq xatosi)</strong><br>
+                                Render bepul serveri to'xtatilgan (<strong>Service Suspended</strong>) yoki uyg'onayotgan bo'lishi mumkin.<br>
+                                <span style="font-size: 0.85em; opacity: 0.9;">Iltimos, Render Dashboard orqali server holatini (<strong>Resume</strong>) tekshiring yoki 15 soniyadan so'ng qayta urinib ko'ring.</span>
+                            </div>
+                        `;
                     } else {
-                        systemLoginError.textContent = "Ulanishda xatolik: " + msg;
+                        systemLoginError.textContent = msg;
                     }
                     systemLoginError.style.display = 'block';
                 }

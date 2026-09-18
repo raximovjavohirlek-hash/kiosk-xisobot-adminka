@@ -1,12 +1,18 @@
 services:
   - type: web
-    name: kiosk-hisobot-backend
+    name: kiosk-xisobot-adminka
     env: python
     region: singapore
     plan: free
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
+    # Persistent Disk configuration (Uncomment when upgrading to Starter plan for 100% data persistence across deploys):
+    # plan: starter
+    # disk:
+    #   name: kiosk-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.10.12
@@ -15,4 +21,7 @@ services:
       - key: SECRET_KEY
         generateValue: true
       - key: ALLOWED_ORIGINS
-        value: https://kiosk-xisobot-adminka.pages.dev
+        value: https://kiosk-xisobot-adminka.pages.dev,https://kiosk-hisobot.pages.dev
+      # Uncomment when disk is mounted:
+      # - key: DATA_DIR
+      #   value: /var/data

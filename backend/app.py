@@ -44,11 +44,23 @@ CORS(app, origins=ALLOWED_ORIGINS + [r'https://.*\.pages\.dev'], supports_creden
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or os.urandom(32).hex()
 
 DATA_DIR = os.environ.get('DATA_DIR')
+BUNDLE_DIR = os.path.dirname(os.path.abspath(__file__))
 if DATA_DIR:
     os.makedirs(DATA_DIR, exist_ok=True)
     app.config['UPLOAD_FOLDER'] = DATA_DIR
+    # Safe one-time seed copy to persistent storage (never overwrites existing production data)
+    for seed_fname in ['kiosk_data.db', 'users.json', 'kiosk_upload_logs.json', 'kiosk_mappings.json', 'audit_log.json']:
+        dst = os.path.join(DATA_DIR, seed_fname)
+        src = os.path.join(BUNDLE_DIR, seed_fname)
+        if not os.path.exists(dst) and os.path.exists(src):
+            try:
+                import shutil
+                shutil.copy2(src, dst)
+                print(f"[Persistent Storage] One-time seed copied: {seed_fname} -> {DATA_DIR}")
+            except Exception as e_seed:
+                print(f"[Persistent Storage] Could not copy seed {seed_fname}:", e_seed)
 else:
-    app.config['UPLOAD_FOLDER'] = os.path.dirname(os.path.abspath(__file__))
+    app.config['UPLOAD_FOLDER'] = BUNDLE_DIR
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB limit
 app.config['ADMIN_PASSWORD'] = os.environ.get('ADMIN_PASSWORD', 'Javo!QAZ')
 
@@ -2025,6 +2037,9 @@ def ping_healthcheck():
     }), 200
 
 def start_self_ping():
+    if os.environ.get('DISABLE_SELF_PING', '').lower() in ('1', 'true', 'yes'):
+        print("[Keep-Alive] Self-ping disabled by DISABLE_SELF_PING environment variable")
+        return
     render_url = os.environ.get('RENDER_EXTERNAL_URL')
     if not render_url:
         return
